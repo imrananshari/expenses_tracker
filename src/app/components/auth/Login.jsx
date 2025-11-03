@@ -137,14 +137,14 @@ const Login = () => {
         </div>
         <button
           type="submit"
-          className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          className="w-full btn-primary"
           disabled={loading}
         >
           {loading ? 'Logging in...' : 'Login'}
         </button>
       </form>
       <div className="text-center text-sm">
-        <a href="/forgot-password" className="text-blue-600 hover:underline">Forgot password?</a>
+        <a href="/forgot-password" className="text-[var(--brand-primary)] hover:underline">Forgot password?</a>
       </div>
       {needsVerification && (
         <div className="mt-3 text-center text-sm">

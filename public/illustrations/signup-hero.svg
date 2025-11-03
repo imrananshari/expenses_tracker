@@ -1,0 +1,23 @@
+<svg width="320" height="160" viewBox="0 0 320 160" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#76c25b" />
+      <stop offset="100%" stop-color="#8fc799" />
+    </linearGradient>
+    <style>
+      .pulse { animation: pulse 2.4s ease-in-out infinite; }
+      @keyframes pulse { 0% { opacity: 0.7 } 50% { opacity: 1 } 100% { opacity: 0.7 } }
+    </style>
+  </defs>
+  <rect x="0" y="0" width="320" height="160" rx="16" fill="url(#grad2)" opacity="0.25" />
+  <!-- User card -->
+  <rect x="40" y="44" width="120" height="72" rx="12" fill="#24252b" opacity="0.9"/>
+  <circle cx="70" cy="72" r="16" fill="#8fc799" class="pulse"/>
+  <rect x="94" y="60" width="50" height="10" rx="4" fill="#1f2025"/>
+  <rect x="94" y="78" width="40" height="8" rx="4" fill="#1f2025"/>
+  <!-- Rupee badge -->
+  <circle cx="220" cy="88" r="18" fill="#76c25b" />
+  <text x="220" y="93" font-size="12" text-anchor="middle" fill="#fff">₹</text>
+  <text x="40" y="35" font-size="16" fill="#24252b" font-weight="bold">Create your account</text>
+  <text x="40" y="145" font-size="12" fill="#24252b" opacity="0.8">Start tracking budgets</text>
+</svg>

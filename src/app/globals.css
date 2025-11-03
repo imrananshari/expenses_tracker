@@ -120,3 +120,127 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Brand theme additions */
+:root {
+  /* Palette requested: #24252b (dark), #8fc799, #77c35c */
+  --brand-primary: #77c35c;
+  --brand-primary-2: #8fc799;
+  --brand-dark: #24252b;
+  --amount-green: #02ba36;
+}
+
+@layer components {
+  .btn-primary {
+    background: linear-gradient(90deg, var(--brand-primary), var(--brand-primary-2));
+    color: #ffffff;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    transition: transform 0.15s ease, filter 0.2s ease;
+  }
+  .btn-primary:hover {
+    filter: brightness(1.05);
+  }
+  .btn-primary:active {
+    transform: translateY(1px);
+  }
+
+  .btn-secondary {
+    background-color: var(--brand-dark);
+    color: #ffffff;
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .brand-gradient {
+    background: linear-gradient(135deg, var(--brand-primary) 0%, var(--brand-primary-2) 100%);
+  }
+
+  /* Brand utilities */
+  .bg-brand-dark { background-color: var(--brand-dark); }
+  .text-brand-soft { color: var(--brand-primary-2); }
+
+  /* Category chip gradient ring and breathing animation */
+  .chip-ring { padding: 2px; border-radius: 9999px; background: linear-gradient(135deg, var(--brand-dark), var(--amount-green)); }
+  .chip-breath { animation: chip-breath 5s ease-in-out infinite; }
+  @keyframes chip-breath { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+
+  .card-widget {
+    background: #ffffff;
+    border-radius: 0.75rem;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+    border: 1px solid rgba(0,0,0,0.06);
+  }
+
+  .dark .card-widget {
+    background: #1f1f23;
+    border-color: rgba(255,255,255,0.08);
+  }
+
+  .icon-bounce {
+    animation: icon-bounce 2s ease-in-out infinite;
+  }
+  @keyframes icon-bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+  }
+
+  .float-slow {
+    animation: float-slow 6s ease-in-out infinite;
+  }
+  @keyframes float-slow {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-6px); }
+  }
+
+  /* subtle card pattern (SVG tile) */
+  .bg-card-pattern {
+    background-image: url('/patterns/auth-pattern.svg');
+    background-repeat: repeat;
+    background-size: 180px 180px;
+  }
+
+  /* subtle diagonal pattern alternative */
+  .bg-diagonal-pattern {
+    background-image: repeating-linear-gradient(135deg,
+      rgba(203, 210, 220, 0.25) 0px,
+      rgba(203, 210, 220, 0.25) 2px,
+      rgba(255, 255, 255, 0) 2px,
+      rgba(255, 255, 255, 0) 22px
+    );
+    background-size: auto;
+    background-repeat: repeat;
+  }
+
+  /* hide horizontal scrollbar but allow scroll */
+  .no-scrollbar {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome, Safari */
+  }
+
+  /* Budget Cards Auto Scroll Animation */
+  @keyframes scroll {
+    0% { transform: translateX(0); }
+    33% { transform: translateX(-33.33%); }
+    66% { transform: translateX(-66.66%); }
+    100% { transform: translateX(0); }
+  }
+
+  .animate-scroll {
+    animation: scroll 12s infinite ease-in-out;
+  }
+
+  .budget-cards-container:hover .animate-scroll {
+    animation-play-state: paused;
+  }
+
+  /* Budget cards layout: 3 per viewport page with snap */
+  .budget-cards-scroll { gap: 1rem; scroll-snap-type: x mandatory; }
+  .budget-card { min-width: calc((100% - 2rem) / 3); scroll-snap-align: start; }
+
+  /* Utility for consistent amount color */
+  .text-amount { color: var(--amount-green); }
+}

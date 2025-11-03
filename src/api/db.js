@@ -73,3 +73,13 @@ export async function addExpense(userId, { categoryId, budgetId, amount, note, p
     .select('id, user_id, category_id, budget_id, amount, note, payee, kind, spent_at')
     .single()
 }
+
+// Recent expenses across all categories for a user
+export async function listRecentExpenses(userId, limit = 5) {
+  return client
+    .from('expenses')
+    .select('id, user_id, category_id, amount, note, payee, kind, spent_at')
+    .eq('user_id', userId)
+    .order('spent_at', { ascending: false })
+    .limit(limit)
+}

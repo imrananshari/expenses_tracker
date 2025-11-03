@@ -1,5 +1,6 @@
 "use client"
 import React, { useState } from 'react'
+import { ShoppingCart, Hammer } from 'lucide-react'
 import { toast } from 'sonner'
 
 const ExpenseForm = ({ categoryId, onExpenseAdded, kind = 'buying', payeeLabel = 'Where/Who (shop or receiver)' }) => {
@@ -40,7 +41,14 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, kind = 'buying', payeeLabel =
 
   return (
     <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg shadow">
-      <h2 className="text-xl font-semibold mb-4">{kind === 'labour' ? 'Add Labour Expense' : 'Add New Expense'}</h2>
+      <div className="flex items-center gap-2 mb-4">
+        {(kind === 'labour') ? (
+          <Hammer className="w-5 h-5 text-[var(--brand-primary)]" />
+        ) : (
+          <ShoppingCart className="w-5 h-5 text-[var(--brand-primary)]" />
+        )}
+        <h2 className="text-xl font-semibold">{kind === 'labour' ? 'Add Labour Expense' : 'Add New Expense'}</h2>
+      </div>
       
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
@@ -109,7 +117,7 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, kind = 'buying', payeeLabel =
         
         <button
           type="submit"
-          className="w-full py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors"
+          className="w-full btn-primary"
           disabled={loading}
         >
           {loading ? 'Adding...' : 'Add Expense'}

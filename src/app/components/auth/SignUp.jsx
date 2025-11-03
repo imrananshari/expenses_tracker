@@ -132,14 +132,14 @@ const SignUp = () => {
         </div>
         <button
           type="submit"
-          className="w-full py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+          className="w-full btn-primary"
           disabled={loading}
         >
           {loading ? 'Creating Account...' : 'Create Account'}
         </button>
       </form>
       <div className="text-center text-sm text-muted-foreground">
-        By signing up, you agree to our <a href="#" className="text-blue-600 hover:underline">Terms of Service</a> and <a href="#" className="text-blue-600 hover:underline">Privacy Policy</a>
+        By signing up, you agree to our <a href="#" className="text-[var(--brand-primary)] hover:underline">Terms of Service</a> and <a href="#" className="text-[var(--brand-primary)] hover:underline">Privacy Policy</a>
       </div>
       {justSignedUp && (
         <div className="mt-3 text-center text-sm">

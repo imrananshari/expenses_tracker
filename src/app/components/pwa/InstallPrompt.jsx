@@ -49,7 +49,7 @@ export default function InstallPrompt() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            className="px-3 py-2 btn-primary"
             onClick={handleInstall}
           >Add</button>
           <button

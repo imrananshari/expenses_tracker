@@ -5,31 +5,66 @@ import Login from './Login'
 import SignUp from './SignUp'
 
 const Auth = () => {
-  const [activeTab, setActiveTab] = useState("login")
-  
+  const [mode, setMode] = useState('idle') // 'idle' | 'login' | 'signup'
+
   return (
-    <div className="w-full max-w-md mx-auto p-6 space-y-6 bg-white rounded-lg shadow-lg dark:bg-zinc-900">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold tracking-tight">Welcome to Budget Tracker</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage your finances with ease</p>
+    <div className="w-full max-w-sm mx-auto p-3 min-h-[85vh] flex items-center justify-center">
+      {/* Gradient border card */}
+      <div className="rounded-2xl p-[3px] brand-gradient w-full">
+        <div className="relative rounded-2xl bg-[#eef1f6] dark:bg-zinc-900 px-6 py-8 overflow-hidden min-h-[420px]">
+          {/* subtle diagonal background pattern */}
+          <div className="absolute inset-0 bg-diagonal-pattern opacity-50 pointer-events-none" />
+          {/* Hero image with position animation */}
+          <div className={`relative flex items-center justify-center transition-all duration-300 ${mode === 'idle' ? 'min-h-[200px]' : 'min-h-[160px]'}`}>
+            <img
+              src="/budgzyx.svg"
+              alt="Budget"
+              className={`z-10 transition-transform duration-300 ${mode === 'idle' ? 'w-40 h-40 translate-y-0' : 'w-36 h-36 -translate-y-2'}`}
+            />
+          </div>
+
+          {mode === 'idle' && (
+            <div className="relative z-10 space-y-3 mt-2 mb-8">
+              <button className="w-full btn-primary" onClick={() => setMode('login')}>Login</button>
+              <button className="w-full btn-secondary" onClick={() => setMode('signup')}>Sign Up</button>
+            </div>
+          )}
+
+          {/* Back button when viewing forms */}
+          {mode !== 'idle' && (
+            <div className="relative z-10 mb-3">
+              <button
+                type="button"
+                onClick={() => setMode('idle')}
+                className="px-3 py-2 text-sm btn-secondary"
+                aria-label="Back"
+              >
+                Back
+              </button>
+            </div>
+          )}
+
+          {mode === 'login' && (
+            <div className="relative z-10 mt-4">
+              <Tabs value={'login'} className="w-full">
+                <TabsContent value="login" className="mt-1">
+                  <Login />
+                </TabsContent>
+              </Tabs>
+            </div>
+          )}
+
+          {mode === 'signup' && (
+            <div className="relative z-10 mt-4">
+              <Tabs value={'signup'} className="w-full">
+                <TabsContent value="signup" className="mt-1">
+                  <SignUp onSignupSuccess={() => setMode('login')} />
+                </TabsContent>
+              </Tabs>
+            </div>
+          )}
+        </div>
       </div>
-      
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="login">Login</TabsTrigger>
-          <TabsTrigger value="signup">Sign Up</TabsTrigger>
-        </TabsList>
-        <TabsContent value="login" className="mt-4">
-          <Login />
-        </TabsContent>
-        <TabsContent value="signup" className="mt-4">
-          <SignUp onSignupSuccess={() => {
-            setTimeout(() => {
-              setActiveTab("login");
-            }, 2000);
-          }} />
-        </TabsContent>
-      </Tabs>
     </div>
   )
 }
