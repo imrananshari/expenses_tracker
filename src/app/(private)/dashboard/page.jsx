@@ -215,8 +215,8 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col">
       <LoadingOverlay visible={overlayVisible} text="Loading data..." />
-      {/* Mobile header */}
-      <div className="rounded-b-[56px] px-4 pt-6 pb-8 bg-brand-dark text-white">
+      {/* Mobile header (12px rounded bottom with 3D shadow) */}
+      <div className="px-4 pt-6 pb-6 bg-brand-dark text-white rounded-b-3xl shadow-2xl shadow-black/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">
@@ -307,7 +307,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
                   prefetch
                   className="inline-flex flex-col items-center transition-colors hover:brightness-105 select-none"
                 >
-                  <span className="w-14 h-14 rounded-full chip-ring">
+                  <span className="w-14 h-14 rounded-full chip-ring shadow-3d">
                     <span className="w-full h-full rounded-full bg-brand-dark flex items-center justify-center">
                       <Icon className="w-6 h-6 text-[var(--amount-green)]" />
                     </span>
@@ -421,7 +421,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
               return (
                 <div key={r.id} className="flex items-center justify-between py-2">
                   <div className="flex items-center gap-3">
-                    <span className="h-7 w-7 rounded-full chip-ring grid place-items-center">
+                    <span className="h-7 w-7 rounded-full chip-ring shadow-3d grid place-items-center">
                       <CatIcon className="w-4 h-4 text-white" />
                     </span>
                     <div className="leading-tight">

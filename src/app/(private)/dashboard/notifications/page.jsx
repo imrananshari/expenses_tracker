@@ -70,7 +70,7 @@ const NotificationsPage = () => {
 
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col">
-      <div className="bg-brand-dark text-white rounded-b-[56px] p-4 flex flex-col min-h-screen">
+      <div className="bg-brand-dark text-white p-4 flex flex-col min-h-screen rounded-b-xl shadow-2xl shadow-black/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* Profile chip instead of back icon */}
