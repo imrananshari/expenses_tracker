@@ -69,8 +69,8 @@ const NotificationsPage = () => {
   }
 
   return (
-    <div className="max-w-md mx-auto px-4">
-      <div className="bg-brand-dark text-white rounded-3xl p-4 flex flex-col min-h-[calc(100vh-2rem)]">
+    <div className="max-w-md mx-auto min-h-screen flex flex-col">
+      <div className="bg-brand-dark text-white rounded-b-[56px] p-4 flex flex-col min-h-screen">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* Profile chip instead of back icon */}
@@ -102,8 +102,8 @@ const NotificationsPage = () => {
           <button onClick={handleBack} className="px-3 py-1 rounded-md bg-white/10 hover:bg-white/20 text-sm" aria-label="Back to Dashboard">← Back</button>
         </div>
 
-        {/* Notifications list (compact, full width cards) */}
-        <div className="mt-3 flex-1">
+        {/* Notifications list (compact, scrollable within content) */}
+        <div className="mt-3 flex-1 overflow-y-auto">
           {filtered.length === 0 ? (
             <div className="p-3 rounded-xl bg-white/10 text-white/80 text-sm">No notifications</div>
           ) : (
@@ -129,8 +129,8 @@ const NotificationsPage = () => {
             </div>
           )}
         </div>
-        {/* Footer actions inside card */}
-        <div className="mt-4 border-t border-white/10 pt-3">
+        {/* Footer actions sticky at bottom */}
+        <div className="mt-4 border-t border-white/10 pt-3 sticky bottom-0 bg-brand-dark/30 backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <button
               className={`text-xs px-2 py-1 rounded-md ${activeFilter==='all' ? 'bg-white/20' : 'bg-white/10 hover:bg-white/20'}`}

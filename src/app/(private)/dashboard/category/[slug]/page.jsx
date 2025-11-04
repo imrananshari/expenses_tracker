@@ -394,7 +394,7 @@ const CategoryPage = () => {
   return (
     <div className="max-w-md mx-auto">
       {/* Mobile header (same style as dashboard) */}
-      <div className="rounded-b-3xl px-4 pt-6 pb-8 bg-brand-dark text-white">
+      <div className="rounded-b-[56px] px-4 pt-6 pb-8 bg-brand-dark text-white">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={handleBackToDashboard} aria-label="Back" className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">←</button>
