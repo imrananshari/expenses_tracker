@@ -1,18 +1,19 @@
 "use client"
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import client from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { getCategoryBySlug, getBudgetForMonth, upsertBudget, listExpenses, addExpense } from '@/api/db'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import LoadingOverlay from '@/app/components/LoadingOverlay'
 
 // Import budget components
 import BudgetForm from '@/app/components/budget/BudgetForm'
 import ExpenseForm from '@/app/components/budget/ExpenseForm'
 import MiniSpendChart from '@/app/components/budget/MiniSpendChart'
 // Mobile redesign uses custom list rows instead of table summary
-import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar } from 'lucide-react'
+import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle } from 'lucide-react'
 
 const CategoryPage = () => {
   const router = useRouter()
@@ -28,9 +29,15 @@ const CategoryPage = () => {
   const [budgetId, setBudgetId] = useState(null)
   const [expensesBuying, setExpensesBuying] = useState([])
   const [expensesLabour, setExpensesLabour] = useState([])
+  const [topups, setTopups] = useState([])
   const [showBudgetForm, setShowBudgetForm] = useState(false)
   const [budgetLoading, setBudgetLoading] = useState(true)
   const [showExpenseModal, setShowExpenseModal] = useState(false)
+  const [showTopupModal, setShowTopupModal] = useState(false)
+  const [topupForm, setTopupForm] = useState({ amount: '', date: '', reason: '', type: '' })
+  const [addingTopup, setAddingTopup] = useState(false)
+  const [notifications, setNotifications] = useState([])
+  const [showNotifications, setShowNotifications] = useState(false)
   const [activeKind, setActiveKind] = useState('buying')
   const [filters, setFilters] = useState({
     buying: { search: '', dateFrom: '', dateTo: '' },
@@ -41,6 +48,10 @@ const CategoryPage = () => {
     labour: { dateFrom: '', dateTo: '' }
   })
   const [datePopoverOpen, setDatePopoverOpen] = useState({ buying: false, labour: false })
+
+  // Loader visibility with minimum display time
+  const [overlayVisible, setOverlayVisible] = useState(true)
+  const overlayStartRef = useRef(0)
 
   // Derived totals for budget alert in the top bar
   const isHomeBuilding = (category?.name || '').toLowerCase().includes('home')
@@ -55,6 +66,8 @@ const CategoryPage = () => {
 
   useEffect(() => {
     const loadData = async () => {
+      overlayStartRef.current = Date.now()
+      setOverlayVisible(true)
       setBudgetLoading(true)
       try {
         if (!user) return
@@ -84,16 +97,72 @@ const CategoryPage = () => {
         }
 
         // Load expenses by kind for this category
-        const [{ data: buyRows, error: buyErr }, { data: labRows, error: labErr }] = await Promise.all([
+        const [
+          { data: buyRows, error: buyErr },
+          { data: labRows, error: labErr },
+          { data: topupRows, error: topupErr }
+        ] = await Promise.all([
           listExpenses(user.id, cat.id, 'buying'),
-          listExpenses(user.id, cat.id, 'labour')
+          listExpenses(user.id, cat.id, 'labour'),
+          listExpenses(user.id, cat.id, 'topup')
         ])
         if (buyErr) console.error(buyErr)
         if (labErr) console.error(labErr)
+        if (topupErr) console.error(topupErr)
         const buyMapped = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying' }))
         const labMapped = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour' }))
+        const topMapped = (topupRows || []).map(e => ({ id: e.id, reason: e.note || 'Added amount', type: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'topup' }))
         setExpensesBuying(buyMapped)
         setExpensesLabour(labMapped)
+        setTopups(topMapped)
+
+        // Build notifications for this category
+        const newNotifications = []
+        const totalSpentNow = (buyMapped || []).reduce((s,e)=>s+Number(e.amount||0),0) + (labMapped || []).reduce((s,e)=>s+Number(e.amount||0),0)
+        const overspentNow = Math.max(0, totalSpentNow - Number(budget || 0))
+        if (overspentNow > 0) {
+          newNotifications.push({
+            id: `overspend-${cat.slug}`,
+            type: 'overspend',
+            title: `Overspent in ${cat.name}`,
+            message: `Exceeded by ₹${overspentNow.toLocaleString()}. Spent ₹${totalSpentNow.toLocaleString()} of ₹${Number(budget||0).toLocaleString()}.`,
+            categorySlug: cat.slug,
+            severity: 'danger',
+            date: new Date().toISOString(),
+          })
+        }
+        const sevenDaysAgoTs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const recentCount = ([...(buyMapped||[]), ...(labMapped||[])]).filter(e => {
+          const dTs = e.date ? new Date(e.date).getTime() : null
+          return dTs && dTs >= sevenDaysAgoTs
+        }).length
+        if (recentCount >= 5) {
+          newNotifications.push({
+            id: `freq-${cat.slug}`,
+            type: 'frequent',
+            title: `Frequent spending`,
+            message: `${recentCount} expenses in the last 7 days.`,
+            categorySlug: cat.slug,
+            severity: 'warning',
+            date: new Date().toISOString(),
+          })
+        }
+        const twoDaysAgoTs = Date.now() - 2 * 24 * 60 * 60 * 1000;
+        (topMapped || []).filter(t => {
+          const dTs = t.date ? new Date(t.date).getTime() : null
+          return dTs && dTs >= twoDaysAgoTs
+        }).forEach(t => {
+          newNotifications.push({
+            id: `topup-${t.id}`,
+            type: 'topup',
+            title: `Budget increased`,
+            message: `Added ₹${Number(t.amount).toLocaleString()} • ${t.reason}`,
+            categorySlug: cat.slug,
+            severity: 'info',
+            date: t.date || new Date().toISOString(),
+          })
+        })
+        setNotifications(newNotifications)
       } finally {
         setBudgetLoading(false)
       }
@@ -102,6 +171,24 @@ const CategoryPage = () => {
       loadData()
     }
   }, [slug, user])
+
+  // Enforce 1.5s minimum loader visibility while loading
+  useEffect(() => {
+    const isBusy = loading || budgetLoading
+    if (isBusy) {
+      if (!overlayStartRef.current) overlayStartRef.current = Date.now()
+      setOverlayVisible(true)
+      return
+    }
+    const elapsed = Date.now() - (overlayStartRef.current || Date.now())
+    const MIN_MS = 1500
+    if (elapsed < MIN_MS) {
+      const id = setTimeout(() => setOverlayVisible(false), MIN_MS - elapsed)
+      return () => clearTimeout(id)
+    } else {
+      setOverlayVisible(false)
+    }
+  }, [loading, budgetLoading])
 
   const handleSignOut = async () => {
     try {
@@ -147,6 +234,78 @@ const CategoryPage = () => {
     }
     // Close modal on successful add
     setShowExpenseModal(false)
+
+    // Frequent spending trigger after new expense
+    const sevenDaysAgoTs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const recentCount = ([...expensesBuying, ...expensesLabour]).filter(e => {
+      const dTs = e.date ? new Date(e.date).getTime() : null
+      return dTs && dTs >= sevenDaysAgoTs
+    }).length
+    if (recentCount >= 5) {
+      setNotifications(prev => ([
+        ...prev.filter(n => !n.id?.startsWith('freq-')),
+        { id: `freq-${category.slug}`, type: 'frequent', title: 'Frequent spending', message: `${recentCount} expenses in the last 7 days.`, categorySlug: category.slug, severity: 'warning', date: new Date().toISOString() }
+      ]))
+    }
+  }
+
+  // Top-up budget modal and submission
+  const openTopupModal = () => {
+    const today = new Date()
+    const y = today.getFullYear()
+    const m = String(today.getMonth()+1).padStart(2,'0')
+    const d = String(today.getDate()).padStart(2,'0')
+    setTopupForm({ amount: '', date: `${y}-${m}-${d}`, reason: '', type: '' })
+    setShowTopupModal(true)
+  }
+
+  const handleTopupSubmit = async () => {
+    if (!category || !user) return
+    const amt = Number(topupForm.amount || 0)
+    if (!amt || amt <= 0) {
+      toast.error('Enter a valid amount')
+      return
+    }
+    setAddingTopup(true)
+    try {
+      // Increase budget for this month
+      const newBudget = Number(budget || 0) + amt
+      const { data: bData, error: bErr } = await upsertBudget(user.id, category.id, newBudget)
+      if (bErr) {
+        console.error(bErr)
+        toast.error('Failed to update budget')
+        return
+      }
+      setBudget(bData.amount)
+      setBudgetId(bData.id)
+
+      // Record the top-up entry (stored in expenses with kind 'topup')
+      const { data: tData, error: tErr } = await addExpense(user.id, {
+        categoryId: category.id,
+        budgetId: bData.id,
+        amount: amt,
+        note: topupForm.reason || 'Added to budget',
+        payee: topupForm.type || null,
+        kind: 'topup',
+        spentAt: topupForm.date || undefined,
+      })
+      if (tErr) {
+        console.error(tErr)
+        toast.error('Budget updated, but failed to record entry')
+      } else {
+        const mapped = { id: tData.id, reason: tData.note || 'Added amount', type: tData.payee || null, amount: tData.amount, date: tData.spent_at, kind: 'topup' }
+        setTopups([mapped, ...topups])
+        setNotifications(prev => ([
+          ...prev,
+          { id: `topup-${tData.id}`, type: 'topup', title: 'Budget increased', message: `Added ₹${Number(tData.amount).toLocaleString()} • ${tData.note || 'Top-up'}`, categorySlug: category.slug, severity: 'info', date: tData.spent_at || new Date().toISOString() }
+        ]))
+      }
+      setShowTopupModal(false)
+      setTopupForm({ amount: '', date: '', reason: '', type: '' })
+      toast.success('Budget increased')
+    } finally {
+      setAddingTopup(false)
+    }
   }
 
   const updateFilter = (kind, key, value) => {
@@ -205,7 +364,11 @@ const CategoryPage = () => {
   }
 
   if (loading || budgetLoading) {
-    return <div className="flex min-h-screen items-center justify-center">Loading...</div>
+    return (
+      <div className="max-w-md mx-auto">
+        <LoadingOverlay visible={overlayVisible} text="Loading data..." />
+      </div>
+    )
   }
 
   // Handle invalid category
@@ -241,8 +404,13 @@ const CategoryPage = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button className="p-2 rounded-full bg-white/10 hover:bg-white/20" aria-label="Notifications">
+            <button className="relative p-2 rounded-full bg-white/10 hover:bg-white/20" aria-label="Notifications" onClick={() => router.push('/dashboard/notifications')}>
               <Bell className="w-5 h-5" />
+              {notifications.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 h-4 min-w-[1rem] px-1 grid place-items-center rounded-full bg-red-600 text-white text-[10px] leading-none">
+                  {notifications.length}
+                </span>
+              )}
             </button>
             <button onClick={handleSignOut} className="p-2 rounded-full bg-white/10 hover:bg-white/20" aria-label="Sign out">
               <LogOut className="w-5 h-5" />
@@ -260,6 +428,13 @@ const CategoryPage = () => {
               </div>
               <div className="flex items-baseline gap-2">
                 <span className="font-extrabold text-3xl text-[var(--amount-green)]">₹{Number(budget).toLocaleString()}</span>
+                <button
+                  type="button"
+                  onClick={openTopupModal}
+                  className="ml-2 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-xs ring-1 ring-white/20"
+                >
+                  Add to Budget
+                </button>
               </div>
             </div>
 
@@ -283,9 +458,30 @@ const CategoryPage = () => {
 
             {/* Mini bar chart below alert */}
             <MiniSpendChart buyingExpenses={expensesBuying} labourExpenses={isHomeBuilding ? expensesLabour : []} />
+
+            {/* Small list of recent budget additions */}
+            {topups.length > 0 && (
+              <div className="mt-3 p-3 bg-white/10 rounded-xl">
+                <div className="text-xs text-white/80 mb-2">Budget Additions</div>
+                <div className="space-y-1">
+                  {topups.slice(0,3).map(t => (
+                    <div key={t.id} className="flex items-center justify-between text-xs text-white/90">
+                      <div className="truncate">
+                        <span className="font-medium">₹{Number(t.amount).toLocaleString()}</span>
+                        <span className="opacity-80"> • {t.reason}</span>
+                        {t.type ? <span className="opacity-60"> • {t.type}</span> : null}
+                      </div>
+                      <div className="opacity-60">{new Date(t.date).toLocaleDateString()}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      
 
       <div className="px-4 py-5">
         {showBudgetForm ? (
@@ -464,6 +660,41 @@ const CategoryPage = () => {
               kind={isHomeBuilding ? activeKind : 'buying'}
               payeeLabel={activeKind === 'labour' ? 'Labour Name' : 'Where/Who (shop)'}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Add to Budget Modal */}
+      {showTopupModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
+          <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-semibold">Add to Budget</h4>
+              <button onClick={() => setShowTopupModal(false)} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Amount (₹)</label>
+                <input type="number" min="0" step="0.01" value={topupForm.amount} onChange={(e)=>setTopupForm(prev=>({...prev, amount: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" placeholder="e.g. 10,000" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Date</label>
+                <input type="date" value={topupForm.date} onChange={(e)=>setTopupForm(prev=>({...prev, date: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Reason</label>
+                <input type="text" value={topupForm.reason} onChange={(e)=>setTopupForm(prev=>({...prev, reason: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" placeholder="e.g. Extra funds, bonus, correction" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">Type</label>
+                <input type="text" value={topupForm.type} onChange={(e)=>setTopupForm(prev=>({...prev, type: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" placeholder="e.g. Cash, Bank transfer" />
+              </div>
+              <button type="button" onClick={handleTopupSubmit} disabled={addingTopup} className="w-full rounded-md bg-brand-dark text-white py-2 ring-1 ring-[var(--brand-primary)]/30 disabled:opacity-60">
+                {addingTopup ? 'Adding...' : 'Add Amount'}
+              </button>
+            </div>
           </div>
         </div>
       )}

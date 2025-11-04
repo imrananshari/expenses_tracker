@@ -1,11 +1,13 @@
 "use client"
 import React, { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import client from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
   import { toast } from 'sonner'
-  import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar } from 'lucide-react'
-import { getUserCategories, getBudgetForMonth, listRecentExpenses, addCategory } from '@/api/db'
+  import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle } from 'lucide-react'
+import { getUserCategories, getBudgetsForMonthBulk, listRecentExpenses, addCategory, listNotifications } from '@/api/db'
+import LoadingOverlay from '@/app/components/LoadingOverlay'
 
   const Dashboard = () => {
   const router = useRouter()
@@ -19,7 +21,15 @@ import { getUserCategories, getBudgetForMonth, listRecentExpenses, addCategory }
   const [recentFilters, setRecentFilters] = useState({ search: '', dateFrom: '', dateTo: '' })
   const [recentDateDraft, setRecentDateDraft] = useState({ dateFrom: '', dateTo: '' })
   const [recentDatePopoverOpen, setRecentDatePopoverOpen] = useState(false)
+  const [showAddCategoryModal, setShowAddCategoryModal] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [addingCat, setAddingCat] = useState(false)
   const scrollRef = useRef(null)
+  const [notifications, setNotifications] = useState([]) // {id,type,title,message,categorySlug,severity,date}
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [overlayVisible, setOverlayVisible] = useState(true)
+  const overlayStartRef = useRef(0)
   
   const handleSignOut = async () => {
     try {
@@ -38,56 +48,85 @@ import { getUserCategories, getBudgetForMonth, listRecentExpenses, addCategory }
 
   useEffect(() => {
     const loadBudgets = async () => {
-      if (!user) return
+      if (!user) { setIsLoading(false); return }
+      setIsLoading(true)
+      overlayStartRef.current = Date.now()
+      setOverlayVisible(true)
       try {
         const { data: cats, error } = await getUserCategories(user.id)
         if (error) {
           console.error(error)
+          setIsLoading(false)
           return
         }
         setCategories(cats || [])
-        const now = new Date()
+
+        const ids = (cats || []).map(c => c.id)
+        const { data: budgetRows } = await getBudgetsForMonthBulk(user.id, ids)
+        const byCategory = new Map((budgetRows || []).map(b => [b.category_id, Number(b.amount || 0)]))
+
         let sum = 0
-        const items = []
-        for (const c of (cats || [])) {
-          const { data: bRow } = await getBudgetForMonth(user.id, c.id, now)
-          const amt = Number(bRow?.amount || 0)
+        const items = (cats || []).map(c => {
+          const amt = Number(byCategory.get(c.id) || 0)
           sum += amt
-          items.push({ name: c.name, slug: c.slug, amount: amt })
-        }
-        // Sort to show higher budgets first (optional)
+          return { name: c.name, slug: c.slug, amount: amt }
+        })
+
         items.sort((a, b) => b.amount - a.amount)
         setCategoryBudgets(items)
         setWalletTotal(sum)
 
-        // recent transactions across all categories
-        const { data: rec } = await listRecentExpenses(user.id, 5)
+        const { data: newNotifications } = await listNotifications(user.id)
+
+        // recent transactions across all categories (limit for faster load)
+        const { data: rec } = await listRecentExpenses(user.id, 20)
         setRecent(rec || [])
+        setNotifications(newNotifications || [])
       } catch (err) {
         console.error('Failed to load budgets', err)
+      } finally {
+        setIsLoading(false)
+        const elapsed = Date.now() - overlayStartRef.current
+        const MIN_MS = 1500
+        if (elapsed < MIN_MS) {
+          setTimeout(() => setOverlayVisible(false), MIN_MS - elapsed)
+        } else {
+          setOverlayVisible(false)
+        }
       }
     }
     loadBudgets()
   }, [user])
+
+  // Badge uses API-derived notifications now; no localStorage syncing needed
 
   const handleCategoryOpen = (slug) => {
     router.push(`/dashboard/category/${slug}`)
   }
 
   const handleAddCategory = async () => {
-    if (!user) return
-    const name = window.prompt('Enter category name')
-    if (!name) return
-    const slug = name.trim().toLowerCase().replace(/\s+/g, '-')
-    const { error } = await addCategory(user.id, { name, slug })
-    if (error) {
-      toast.error('Failed to add category')
+    if (!user || addingCat) return
+    const name = newCatName.trim()
+    if (!name) {
+      toast.error('Please enter a category name')
       return
     }
-    toast.success('Category added')
-    // refresh
-    const { data: cats } = await getUserCategories(user.id)
-    setCategories(cats || [])
+    setAddingCat(true)
+    try {
+      const slug = name.toLowerCase().replace(/\s+/g, '-')
+      const { error } = await addCategory(user.id, { name, slug })
+      if (error) {
+        toast.error('Failed to add category')
+        return
+      }
+      toast.success('Category added')
+      setShowAddCategoryModal(false)
+      setNewCatName('')
+      const { data: cats } = await getUserCategories(user.id)
+      setCategories(cats || [])
+    } finally {
+      setAddingCat(false)
+    }
   }
 
   // Choose an icon based on category name
@@ -174,7 +213,8 @@ import { getUserCategories, getBudgetForMonth, listRecentExpenses, addCategory }
   }
 
   return (
-    <div className="max-w-md mx-auto">
+    <div className="max-w-md mx-auto min-h-screen flex flex-col">
+      <LoadingOverlay visible={overlayVisible} text="Loading data..." />
       {/* Mobile header */}
       <div className="rounded-b-3xl px-4 pt-6 pb-8 bg-brand-dark text-white">
         <div className="flex items-center justify-between">
@@ -188,16 +228,24 @@ import { getUserCategories, getBudgetForMonth, listRecentExpenses, addCategory }
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <button className="p-2 rounded-full bg-white/10 hover:bg-white/20" aria-label="Notifications">
+            <button
+              className="relative p-2 rounded-full bg-white/10 hover:bg-white/20"
+              aria-label="Notifications"
+              onClick={() => router.push('/dashboard/notifications')}
+            >
               <Bell className="w-5 h-5" />
+              {notifications.length > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 h-4 min-w-[1rem] px-1 grid place-items-center rounded-full bg-red-600 text-white text-[10px] leading-none">
+                  {notifications.length}
+                </span>
+              )}
             </button>
             <button onClick={handleSignOut} className="p-2 rounded-full bg-white/10 hover:bg-white/20" aria-label="Sign out">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
-        </div>
-
-        {/* Budget Cards Section */}
+      </div>
+      {/* Budget Cards Section */}
         <div className="mt-6">
           <div className="flex items-center justify-between">
             <p className="text-sm opacity-90">Your Budgets</p>
@@ -240,7 +288,7 @@ import { getUserCategories, getBudgetForMonth, listRecentExpenses, addCategory }
         <div className="flex items-center justify-between mb-3">
           <h3 className="font-semibold">Categories</h3>
           <button
-            onClick={handleAddCategory}
+            onClick={() => setShowAddCategoryModal(true)}
             className="h-8 w-8 rounded-full bg-white/90 dark:bg-zinc-800 shadow flex items-center justify-center ring-1 ring-[var(--brand-primary)]/30"
             aria-label="Add category"
             title="Add category"
@@ -248,27 +296,75 @@ import { getUserCategories, getBudgetForMonth, listRecentExpenses, addCategory }
             <Plus className="w-5 h-5 text-[var(--brand-primary)]" />
           </button>
         </div>
-        <div className="overflow-x-auto no-scrollbar">
-          <div className="flex items-center gap-4 min-w-full">
+        <div className="overflow-x-auto no-scrollbar mt-4 mb-2">
+          <div className="flex items-center gap-5 min-w-full">
             {categories.map((c) => {
               const Icon = getCategoryIcon(c.name)
               return (
-                <button key={c.slug} onClick={() => handleCategoryOpen(c.slug)} className="inline-flex flex-col items-center chip-breath hover:scale-105 transition-transform">
+                <Link
+                  key={c.slug}
+                  href={`/dashboard/category/${c.slug}`}
+                  prefetch
+                  className="inline-flex flex-col items-center transition-colors hover:brightness-105 select-none"
+                >
                   <span className="w-14 h-14 rounded-full chip-ring">
                     <span className="w-full h-full rounded-full bg-brand-dark flex items-center justify-center">
                       <Icon className="w-6 h-6 text-[var(--amount-green)]" />
                     </span>
                   </span>
-                <span className="mt-2 text-xs max-w-[5rem] truncate text-black">{c.name}</span>
-                </button>
+                  <span className="mt-2 text-xs max-w-[5rem] truncate text-black">{c.name}</span>
+                </Link>
               )
             })}
           </div>
         </div>
       </div>
 
-      {/* Recent Expenses (only section) */}
-      <div className="px-4 pb-6">
+      {/* Add Category Modal */}
+      {showAddCategoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setShowAddCategoryModal(false)}></div>
+          <div className="relative z-10 w-full max-w-sm mx-4 p-4 bg-white dark:bg-zinc-800 rounded-xl shadow ring-1 ring-[var(--brand-primary)]/20">
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="font-semibold">Add New Category</h4>
+              <button
+                onClick={() => setShowAddCategoryModal(false)}
+                aria-label="Close"
+                className="grid place-items-center h-8 w-8 rounded-full bg-gray-200 dark:bg-zinc-700"
+              >
+                <span className="sr-only">Close</span>
+                <span className="leading-none">✕</span>
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label htmlFor="newCategoryName" className="text-sm font-medium">Category Name</label>
+                <input
+                  id="newCategoryName"
+                  type="text"
+                  value={newCatName}
+                  onChange={(e) => setNewCatName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600"
+                  placeholder="e.g. Home Building, Grocery, Subscription"
+                  autoFocus
+                  disabled={addingCat}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleAddCategory}
+                className="w-full rounded-md bg-brand-dark text-white py-2 ring-1 ring-[var(--brand-primary)]/30 disabled:opacity-60"
+                disabled={addingCat}
+              >
+                {addingCat ? 'Adding...' : 'Add Category'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Expenses scrollable area */}
+      <div className="flex-1 overflow-y-auto scroll-smooth px-4 pb-6">
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-xl shadow">
           <div className="relative flex items-center mb-3 gap-2">
             <h3 className="font-semibold">Recent Expenses</h3>
