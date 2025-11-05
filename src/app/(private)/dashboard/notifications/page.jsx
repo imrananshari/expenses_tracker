@@ -14,14 +14,13 @@ const NotificationsPage = () => {
   const [activeFilter, setActiveFilter] = useState('all') // all | overspend | frequent | topup
   const [shuffleTick, setShuffleTick] = useState(0)
 
+  // Rely on (private) layout for protection; avoid client-side redirect race
   useEffect(() => {
-    if (!loading && !user) {
-      router.push('/')
-    }
-  }, [loading, user, router])
+    // no-op: layout handles redirect; this page just waits for user
+  }, [])
 
   useEffect(() => {
-    if (!user) return
+    if (!user?.id) return
     const loadData = async () => {
       try {
         // Prefer actual profile name over email for display
@@ -34,7 +33,7 @@ const NotificationsPage = () => {
       }
     }
     loadData()
-  }, [user])
+  }, [user?.id])
 
   // Note: count now comes from API; dashboard reads same source
 
@@ -44,7 +43,7 @@ const NotificationsPage = () => {
     router.push('/')
   }
 
-  if (loading) {
+  if (loading || !user) {
     return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   }
 

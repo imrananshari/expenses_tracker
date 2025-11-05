@@ -1,17 +1,20 @@
 "use client"
 import React, { useState } from 'react'
 import client from '@/api/client'
+import { loginWithMpin } from '@/api/db'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 
 const Login = () => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [mpin, setMpin] = useState('')
   const [loading, setLoading] = useState(false)
   const [needsVerification, setNeedsVerification] = useState(false)
   const [resendLoading, setResendLoading] = useState(false)
   const [showReset, setShowReset] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
+  const [method, setMethod] = useState('password') // 'password' | 'mpin'
   const router = useRouter()
 
   const handleSubmit = async (e) => {
@@ -26,23 +29,62 @@ const Login = () => {
         setLoading(false)
         return
       }
-
-      const { data, error } = await client.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      })
-      if (error) {
-        // Many Supabase deployments return invalid_credentials until email is confirmed.
-        const msg = (error?.message || '').toLowerCase()
-        const looksUnconfirmed = msg.includes('confirm') || msg.includes('not confirmed')
-        setNeedsVerification(looksUnconfirmed || msg.includes('invalid'))
-        toast.error(looksUnconfirmed
-          ? 'Email not confirmed. Please confirm your email.'
-          : 'Invalid login credentials. If you just signed up, confirm your email first.')
+      // Wait for session helper to avoid race with Private layout redirect
+      const waitForSession = async (timeoutMs = 3000) => {
+        const start = Date.now()
+        // quick check first
+        const first = await client.auth.getSession()
+        if (first?.data?.session?.user) return true
+        return new Promise((resolve) => {
+          const unsub = client.auth.onAuthStateChange((event, session) => {
+            if (event === 'SIGNED_IN' && session?.user) {
+              unsub?.data?.subscription?.unsubscribe?.()
+              resolve(true)
+            }
+          })
+          const id = setInterval(async () => {
+            const { data } = await client.auth.getSession()
+            if (data?.session?.user || Date.now() - start > timeoutMs) {
+              clearInterval(id)
+              unsub?.data?.subscription?.unsubscribe?.()
+              resolve(Boolean(data?.session?.user))
+            }
+          }, 150)
+        })
+      }
+      if (method === 'password') {
+        const { data, error } = await client.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        })
+        if (error) {
+          const msg = (error?.message || '').toLowerCase()
+          const looksUnconfirmed = msg.includes('confirm') || msg.includes('not confirmed')
+          setNeedsVerification(looksUnconfirmed || msg.includes('invalid'))
+          toast.error(looksUnconfirmed
+            ? 'Email not confirmed. Please confirm your email.'
+            : 'Invalid login credentials. If you just signed up, confirm your email first.')
+        } else {
+          toast.success('Logged in successfully')
+          await waitForSession()
+          router.replace('/dashboard')
+        }
       } else {
-        toast.success('Logged in successfully')
-        // Navigate to dashboard; Home page also auto-redirects
-        router.push('/dashboard')
+        if (!/^\d{4}$/.test(mpin.trim())) {
+          toast.error('Enter a valid 4-digit M-PIN')
+        } else {
+          const { error } = await loginWithMpin(cleanEmail, mpin.trim())
+          if (error) {
+            const msg = (error?.message || '').toLowerCase()
+            const looksUnconfirmed = msg.includes('confirm') || msg.includes('not confirmed')
+            setNeedsVerification(looksUnconfirmed || msg.includes('invalid'))
+            toast.error(looksUnconfirmed ? 'Email not confirmed. Please confirm your email.' : 'Invalid M-PIN or login failed')
+          } else {
+            toast.success('Logged in with M-PIN')
+            await waitForSession()
+            router.replace('/dashboard')
+          }
+        }
       }
     } catch (err) {
       console.error('Login exception:', err)
@@ -106,6 +148,20 @@ const Login = () => {
 
   return (
     <div className="space-y-4">
+      {/* Method toggle */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setMethod('password')}
+          className={`px-3 py-2 rounded-md text-sm ${method === 'password' ? 'btn-primary' : 'btn-secondary'}`}
+        >Password</button>
+        <button
+          type="button"
+          onClick={() => setMethod('mpin')}
+          className={`px-3 py-2 rounded-md text-sm ${method === 'mpin' ? 'btn-primary' : 'btn-secondary'}`}
+        >M-PIN</button>
+      </div>
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <label htmlFor="email" className="text-sm font-medium">
@@ -121,26 +177,43 @@ const Login = () => {
             required
           />
         </div>
-        <div className="space-y-2">
-          <label htmlFor="password" className="text-sm font-medium">
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-3 py-2 border rounded-md border-input bg-background"
-            placeholder="••••••••"
-            required
-          />
-        </div>
+        {method === 'password' ? (
+          <div className="space-y-2">
+            <label htmlFor="password" className="text-sm font-medium">Password</label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-3 py-2 border rounded-md border-input bg-background"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <label htmlFor="mpin" className="text-sm font-medium">4-digit M-PIN</label>
+            <input
+              id="mpin"
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={4}
+              value={mpin}
+              onChange={(e) => setMpin(e.target.value.replace(/\D/g, '').slice(0,4))}
+              className="w-full px-3 py-2 border rounded-md border-input bg-background"
+              placeholder="••••"
+              required
+            />
+            <p className="text-xs text-muted-foreground">Login using email + M-PIN (no password). Any 4-digit code works.</p>
+          </div>
+        )}
         <button
           type="submit"
           className="w-full btn-primary"
           disabled={loading}
         >
-          {loading ? 'Logging in...' : 'Login'}
+          {loading ? (method === 'mpin' ? 'Logging in with M-PIN…' : 'Logging in…') : (method === 'mpin' ? 'Login with M-PIN' : 'Login')}
         </button>
       </form>
       <div className="text-center text-sm">

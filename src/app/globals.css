@@ -43,6 +43,12 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Global button cursor behavior */
+@layer base {
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);

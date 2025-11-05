@@ -2,7 +2,7 @@
 import React from 'react'
 import { IndianRupee } from 'lucide-react'
 
-const LoadingOverlay = ({ visible = false, text = 'Loading...' }) => {
+const LoadingOverlay = ({ visible = false, text = '' }) => {
   if (!visible) return null
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 backdrop-blur-sm">
@@ -38,7 +38,9 @@ const LoadingOverlay = ({ visible = false, text = 'Loading...' }) => {
             <IndianRupee className="w-12 h-12 rupee-icon" />
           </div>
         </div>
-        <span className="text-sm text-gray-700 dark:text-gray-200">{text}</span>
+        {text ? (
+          <span className="text-sm text-gray-700 dark:text-gray-200">{text}</span>
+        ) : null}
       </div>
 
       {/* Component-scoped animation styles */}

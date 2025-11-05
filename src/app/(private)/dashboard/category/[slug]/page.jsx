@@ -1,5 +1,5 @@
 "use client"
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import client from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
@@ -18,7 +18,7 @@ import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHor
 const CategoryPage = () => {
   const router = useRouter()
   const params = useParams()
-  const { user, loading } = useAuth()
+  const { user, loading, signOut } = useAuth()
   const slug = params.slug
   const [category, setCategory] = useState(null) // { id: dbId, name, slug }
   const displayName = (user?.user_metadata?.name || user?.email || '').split('@')[0]
@@ -170,7 +170,7 @@ const CategoryPage = () => {
     if (slug && user) {
       loadData()
     }
-  }, [slug, user])
+  }, [slug, user?.id])
 
   // Enforce 1.5s minimum loader visibility while loading
   useEffect(() => {
@@ -192,16 +192,12 @@ const CategoryPage = () => {
 
   const handleSignOut = async () => {
     try {
-      const { error } = await client.auth.signOut()
-      if (error) {
-        toast.error(error.message)
-      } else {
-        toast.success('Signed out successfully')
-        router.push('/')
-      }
+      await signOut('local')
+      toast.success('Signed out')
+      router.replace('/')
     } catch (err) {
-      toast.error('Error signing out')
-      console.error(err)
+      toast.warning('Signed out locally')
+      router.replace('/')
     }
   }
 
@@ -357,6 +353,40 @@ const CategoryPage = () => {
     return MoreHorizontal
   }
 
+  // Visible counts per list for incremental loading (declare BEFORE any conditional returns)
+  const [visibleCounts, setVisibleCounts] = useState({ buying: 3, labour: 3 })
+  const contentScrollRef = useRef(null)
+  const buyingSentinelRef = useRef(null)
+  const labourSentinelRef = useRef(null)
+
+  const filteredBuying = useMemo(() => applyFilters(expensesBuying, 'buying'), [expensesBuying, filters])
+  const filteredLabour = useMemo(() => applyFilters(expensesLabour, 'labour'), [expensesLabour, filters])
+
+  // Reset visible counts when filters or data change
+  useEffect(() => {
+    setVisibleCounts({ buying: 3, labour: 3 })
+  }, [filters, expensesBuying.length, expensesLabour.length])
+
+  // Observe sentinels to load more
+  useEffect(() => {
+    const root = contentScrollRef.current || null
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return
+        const id = entry.target.getAttribute('data-id')
+        if (id === 'buying') {
+          setVisibleCounts((prev) => ({ ...prev, buying: Math.min(prev.buying + 3, filteredBuying.length) }))
+        }
+        if (id === 'labour') {
+          setVisibleCounts((prev) => ({ ...prev, labour: Math.min(prev.labour + 3, filteredLabour.length) }))
+        }
+      })
+    }, { root, threshold: 1.0 })
+    if (buyingSentinelRef.current) observer.observe(buyingSentinelRef.current)
+    if (labourSentinelRef.current) observer.observe(labourSentinelRef.current)
+    return () => observer.disconnect()
+  }, [filteredBuying.length, filteredLabour.length])
+
   // Protect the route
   if (!loading && !user) {
     router.push('/')
@@ -366,7 +396,7 @@ const CategoryPage = () => {
   if (loading || budgetLoading) {
     return (
       <div className="max-w-md mx-auto">
-        <LoadingOverlay visible={overlayVisible} text="Loading data..." />
+        <LoadingOverlay visible={overlayVisible} />
       </div>
     )
   }
@@ -391,10 +421,11 @@ const CategoryPage = () => {
     )
   }
 
+
   return (
-    <div className="max-w-md mx-auto">
+    <div className="max-w-md mx-auto min-h-screen flex flex-col">
       {/* Mobile header (12px rounded bottom with 3D shadow) */}
-      <div className="px-4 pt-6 pb-6 bg-brand-dark text-white rounded-b-3xl shadow-2xl shadow-black/30">
+      <div className="px-4 pt-6 pb-6 bg-brand-dark text-white rounded-b-xl shadow-2xl shadow-black/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={handleBackToDashboard} aria-label="Back" className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">←</button>
@@ -483,7 +514,7 @@ const CategoryPage = () => {
 
       
 
-      <div className="px-4 py-5">
+      <div ref={contentScrollRef} className="flex-1 overflow-y-auto px-4 py-5">
         {showBudgetForm ? (
           <BudgetForm 
             categoryId={category.id} 
@@ -539,7 +570,7 @@ const CategoryPage = () => {
                   )}
                 </div>
                 <div className="space-y-2">
-                  {applyFilters(expensesBuying, 'buying').map((e) => {
+                  {filteredBuying.slice(0, visibleCounts.buying).map((e) => {
                     const CatIcon = getCategoryIcon(category?.name)
                     return (
                       <div key={e.id} className="flex items-center justify-between py-2">
@@ -559,8 +590,11 @@ const CategoryPage = () => {
                       </div>
                     )
                   })}
-                  {applyFilters(expensesBuying, 'buying').length === 0 && (
+                  {filteredBuying.length === 0 && (
                     <div className="text-sm text-gray-500">No buying expenses</div>
+                  )}
+                  {filteredBuying.length > visibleCounts.buying && (
+                    <div ref={buyingSentinelRef} data-id="buying" className="h-8 grid place-items-center text-xs text-gray-500">Loading more…</div>
                   )}
                 </div>
               </div>
@@ -596,7 +630,7 @@ const CategoryPage = () => {
                   )}
                 </div>
                 <div className="space-y-2">
-                  {applyFilters(expensesLabour, 'labour').map((e) => {
+                    {filteredLabour.slice(0, visibleCounts.labour).map((e) => {
                     const CatIcon = getCategoryIcon(category?.name)
                     return (
                       <div key={e.id} className="flex items-center justify-between py-2">
@@ -616,8 +650,11 @@ const CategoryPage = () => {
                       </div>
                     )
                   })}
-                  {applyFilters(expensesLabour, 'labour').length === 0 && (
+                  {filteredLabour.length === 0 && (
                     <div className="text-sm text-gray-500">No labour expenses</div>
+                  )}
+                  {filteredLabour.length > visibleCounts.labour && (
+                    <div ref={labourSentinelRef} data-id="labour" className="h-8 grid place-items-center text-xs text-gray-500">Loading more…</div>
                   )}
                 </div>
               </div>

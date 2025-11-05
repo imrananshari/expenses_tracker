@@ -4,6 +4,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useRouter } from "next/navigation";
 import Auth from "./components/auth/Auth";
 import { useEffect } from "react";
+import client from "@/api/client";
 
 
 export default function Home() {
@@ -12,7 +13,16 @@ export default function Home() {
 
  useEffect(()=>{
   if(!loading && user){
-    router.push("/dashboard")
+    router.replace("/dashboard")
+    return
+  }
+  // Fallback: if session exists but context hasn't updated yet, redirect
+  if (!loading && !user) {
+    client.auth.getSession().then(({ data }) => {
+      if (data?.session?.user) {
+        router.replace('/dashboard')
+      }
+    })
   }
  },[user,loading,router])
  

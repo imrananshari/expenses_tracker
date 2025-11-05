@@ -15,11 +15,11 @@ const Auth = () => {
           {/* subtle diagonal background pattern */}
           <div className="absolute inset-0 bg-diagonal-pattern opacity-50 pointer-events-none" />
           {/* Hero image with position animation */}
-          <div className={`relative flex items-center justify-center transition-all duration-300 ${mode === 'idle' ? 'min-h-[200px]' : 'min-h-[160px]'}`}>
+          <div className={`relative flex items-center justify-center transition-all duration-300 ${mode === 'idle' ? 'min-h-[180px]' : 'min-h-[130px]'}`}>
             <img
               src="/budgzyx.svg"
               alt="Budget"
-              className={`z-10 transition-transform duration-300 ${mode === 'idle' ? 'w-40 h-40 translate-y-0' : 'w-36 h-36 -translate-y-2'}`}
+              className={`z-10 transition-transform duration-300 ${mode === 'idle' ? 'w-40 h-40 translate-y-0' : 'w-32 h-32 -translate-y-3'}`}
             />
           </div>
 
@@ -30,19 +30,7 @@ const Auth = () => {
             </div>
           )}
 
-          {/* Back button when viewing forms */}
-          {mode !== 'idle' && (
-            <div className="relative z-10 mb-3">
-              <button
-                type="button"
-                onClick={() => setMode('idle')}
-                className="px-3 py-2 text-sm btn-secondary"
-                aria-label="Back"
-              >
-                Back
-              </button>
-            </div>
-          )}
+          {/* Back button removed for a cleaner, minimal auth header */}
 
           {mode === 'login' && (
             <div className="relative z-10 mt-4">
@@ -55,10 +43,10 @@ const Auth = () => {
           )}
 
           {mode === 'signup' && (
-            <div className="relative z-10 mt-4">
+            <div className="relative z-10 mt-0">
               <Tabs value={'signup'} className="w-full">
                 <TabsContent value="signup" className="mt-1">
-                  <SignUp onSignupSuccess={() => setMode('login')} />
+                   <SignUp onBack={() => setMode('idle')} onSignupSuccess={() => setMode('login')} />
                 </TabsContent>
               </Tabs>
             </div>

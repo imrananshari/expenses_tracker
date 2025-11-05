@@ -1,19 +1,29 @@
 "use client"
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import client from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
   import { toast } from 'sonner'
-  import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle } from 'lucide-react'
-import { getUserCategories, getBudgetsForMonthBulk, listRecentExpenses, addCategory, listNotifications } from '@/api/db'
+import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil } from 'lucide-react'
+import { getUserCategories, getBudgetsForMonthBulk, listRecentExpenses, addCategory, listNotifications, maybeGetAvatarUrlForEmail, getPublicAvatarUrl, uploadAvatarDataUrl, getProfileForUser, upsertProfileByEmail } from '@/api/db'
 import LoadingOverlay from '@/app/components/LoadingOverlay'
 
   const Dashboard = () => {
   const router = useRouter()
-  const { user, loading } = useAuth()
-  const displayName = (user?.user_metadata?.name || user?.email || '').split('@')[0]
-  const initials = (user?.user_metadata?.name || displayName || 'U').charAt(0).toUpperCase()
+  const { user, loading, signOut } = useAuth()
+  const [sessionUser, setSessionUser] = useState(null)
+  const effectiveUser = user || sessionUser
+  const [profile, setProfile] = useState(null)
+  const displayName = (profile?.name || effectiveUser?.user_metadata?.name || effectiveUser?.email || '').split('@')[0]
+  const initials = (effectiveUser?.user_metadata?.name || displayName || 'U').charAt(0).toUpperCase()
+  const [avatarOverride, setAvatarOverride] = useState('')
+  const [avatarUpdating, setAvatarUpdating] = useState(false)
+  const fileInputRef = useRef(null)
+  const avatarUrlBase = profile?.avatar_url ? profile.avatar_url : ''
+  const avatarUrl = avatarOverride || avatarUrlBase
+  const avatarExts = ['.jpg', '.png', '.webp']
+  const [avatarTryIndex, setAvatarTryIndex] = useState(0)
   const [walletTotal, setWalletTotal] = useState(0)
   const [categoryBudgets, setCategoryBudgets] = useState([]) // [{name, slug, amount}]
   const [categories, setCategories] = useState([]) // [{id, name, slug}]
@@ -21,6 +31,9 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   const [recentFilters, setRecentFilters] = useState({ search: '', dateFrom: '', dateTo: '' })
   const [recentDateDraft, setRecentDateDraft] = useState({ dateFrom: '', dateTo: '' })
   const [recentDatePopoverOpen, setRecentDatePopoverOpen] = useState(false)
+  const [recentVisibleCount, setRecentVisibleCount] = useState(5)
+  const recentScrollRef = useRef(null)
+  const recentSentinelRef = useRef(null)
   const [showAddCategoryModal, setShowAddCategoryModal] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [addingCat, setAddingCat] = useState(false)
@@ -30,30 +43,88 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   const [isLoading, setIsLoading] = useState(true)
   const [overlayVisible, setOverlayVisible] = useState(true)
   const overlayStartRef = useRef(0)
+
+  // Bridge: if context user not ready immediately after login, read session user
+  useEffect(() => {
+    let cancelled = false
+    const syncSession = async () => {
+      if (user) { setSessionUser(null); return }
+      const { data } = await client.auth.getSession()
+      if (cancelled) return
+      setSessionUser(data?.session?.user || null)
+    }
+    syncSession()
+    const { data: sub } = client.auth.onAuthStateChange((evt, session) => {
+      if (evt === 'SIGNED_IN' || evt === 'USER_UPDATED' || evt === 'TOKEN_REFRESHED') {
+        setSessionUser(session?.user || null)
+      }
+      if (evt === 'SIGNED_OUT') {
+        setSessionUser(null)
+      }
+    })
+    return () => { cancelled = true; sub?.subscription?.unsubscribe?.() }
+  }, [user])
   
   const handleSignOut = async () => {
     try {
-      const { error } = await client.auth.signOut()
-      if (error) {
-        toast.error(error.message)
-      } else {
-        toast.success('Signed out successfully')
-        router.push('/')
-      }
+      await signOut('local')
+      toast.success('Signed out')
+      router.replace('/')
     } catch (err) {
-      toast.error('Error signing out')
-      console.error(err)
+      toast.warning('Signed out locally')
+      router.replace('/')
     }
   }
 
   useEffect(() => {
+    let cancelled = false
+    const loadProfile = async () => {
+      if (!effectiveUser?.id || cancelled) { setProfile(null); return }
+      try {
+        const { data, error } = await getProfileForUser(effectiveUser.id)
+        if (cancelled) return
+        if (error && effectiveUser?.id) {
+          // Use warn in dev to avoid Next overlay; ignore after sign-out
+          console.warn('Profile load warning:', error)
+        }
+        setProfile(data || null)
+      } catch (err) {
+        if (cancelled) return
+        console.warn('Failed to load profile', err)
+      }
+    }
+    loadProfile()
+    return () => { cancelled = true }
+  }, [effectiveUser?.id])
+
+  // Independently attempt to resolve a valid avatar URL by checking known extensions
+  useEffect(() => {
+    const run = async () => {
+      if (!effectiveUser?.email) return
+      try {
+        // Prefer profile-provided URL; else try public URLs by extension
+        if (profile?.avatar_url) {
+          setAvatarOverride(profile.avatar_url)
+          return
+        }
+        const firstUrl = getPublicAvatarUrl(effectiveUser.email, avatarExts[0])
+        setAvatarTryIndex(0)
+        setAvatarOverride(firstUrl || '')
+      } catch {
+        setAvatarOverride('')
+      }
+    }
+    run()
+  }, [effectiveUser?.email, profile?.avatar_url])
+
+  useEffect(() => {
     const loadBudgets = async () => {
-      if (!user) { setIsLoading(false); return }
+      if (!effectiveUser?.id) { setIsLoading(false); return }
       setIsLoading(true)
       overlayStartRef.current = Date.now()
       setOverlayVisible(true)
       try {
-        const { data: cats, error } = await getUserCategories(user.id)
+        const { data: cats, error } = await getUserCategories(effectiveUser.id)
         if (error) {
           console.error(error)
           setIsLoading(false)
@@ -62,7 +133,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
         setCategories(cats || [])
 
         const ids = (cats || []).map(c => c.id)
-        const { data: budgetRows } = await getBudgetsForMonthBulk(user.id, ids)
+        const { data: budgetRows } = await getBudgetsForMonthBulk(effectiveUser.id, ids)
         const byCategory = new Map((budgetRows || []).map(b => [b.category_id, Number(b.amount || 0)]))
 
         let sum = 0
@@ -76,10 +147,10 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
         setCategoryBudgets(items)
         setWalletTotal(sum)
 
-        const { data: newNotifications } = await listNotifications(user.id)
+        const { data: newNotifications } = await listNotifications(effectiveUser.id)
 
         // recent transactions across all categories (limit for faster load)
-        const { data: rec } = await listRecentExpenses(user.id, 20)
+        const { data: rec } = await listRecentExpenses(effectiveUser.id, 20)
         setRecent(rec || [])
         setNotifications(newNotifications || [])
       } catch (err) {
@@ -96,7 +167,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
       }
     }
     loadBudgets()
-  }, [user])
+  }, [effectiveUser?.id])
 
   // Badge uses API-derived notifications now; no localStorage syncing needed
 
@@ -105,7 +176,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   }
 
   const handleAddCategory = async () => {
-    if (!user || addingCat) return
+    if (!effectiveUser || addingCat) return
     const name = newCatName.trim()
     if (!name) {
       toast.error('Please enter a category name')
@@ -114,7 +185,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
     setAddingCat(true)
     try {
       const slug = name.toLowerCase().replace(/\s+/g, '-')
-      const { error } = await addCategory(user.id, { name, slug })
+      const { error } = await addCategory(effectiveUser.id, { name, slug })
       if (error) {
         toast.error('Failed to add category')
         return
@@ -122,7 +193,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
       toast.success('Category added')
       setShowAddCategoryModal(false)
       setNewCatName('')
-      const { data: cats } = await getUserCategories(user.id)
+      const { data: cats } = await getUserCategories(effectiveUser.id)
       setCategories(cats || [])
     } finally {
       setAddingCat(false)
@@ -137,16 +208,6 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
     if (n.includes('subscription')) return CreditCard
     if (n.includes('personal')) return User
     return MoreHorizontal
-  }
-
-  // Protect the dashboard route
-  if (!loading && !user) {
-    router.push('/')
-    return null
-  }
-
-  if (loading) {
-    return <div className="flex min-h-screen items-center justify-center">Loading...</div>
   }
 
   // Derived: show only budgets with assigned amounts and total sum
@@ -212,16 +273,62 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
     })
   }
 
+  const filteredRecent = useMemo(() => applyRecentFilters(recent), [recent, recentFilters, categories])
+
+  // Reset visible count when filters or data change
+  useEffect(() => {
+    setRecentVisibleCount(5)
+  }, [recentFilters, recent.length])
+
+  // Infinite load more when reaching sentinel
+  useEffect(() => {
+    const root = recentScrollRef.current || null
+    const sentinel = recentSentinelRef.current
+    if (!sentinel) return
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          setRecentVisibleCount((prev) => Math.min(prev + 5, filteredRecent.length))
+        }
+      })
+    }, { root, threshold: 1.0 })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [filteredRecent.length])
+
+  // Show loader after all hooks are declared to avoid hook-order mismatch on sign-out
+  if (!effectiveUser) {
+    return <div className="flex min-h-screen items-center justify-center">Loading...</div>
+  }
+
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col">
-      <LoadingOverlay visible={overlayVisible} text="Loading data..." />
+      <LoadingOverlay visible={overlayVisible} />
       {/* Mobile header (12px rounded bottom with 3D shadow) */}
-      <div className="px-4 pt-6 pb-6 bg-brand-dark text-white rounded-b-3xl shadow-2xl shadow-black/30">
+      <div className="px-4 pt-6 pb-6 bg-brand-dark text-white rounded-b-xl  shadow-2xl shadow-black/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">
-              {initials}
-            </div>
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt="Profile"
+                className="w-10 h-10 rounded-full object-cover"
+                onError={() => {
+                  // Try the next extension; fall back to initials when exhausted
+                  const next = avatarTryIndex + 1
+                  if (next < avatarExts.length && effectiveUser?.email) {
+                    setAvatarTryIndex(next)
+                    setAvatarOverride(getPublicAvatarUrl(effectiveUser.email, avatarExts[next]) || '')
+                  } else {
+                    setAvatarOverride('')
+                  }
+                }}
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">
+                {initials}
+              </div>
+            )}
             <div>
               <p className="text-sm opacity-80">Hello,</p>
               <p className="text-base font-semibold capitalize">{displayName}</p>
@@ -240,10 +347,71 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
                 </span>
               )}
             </button>
+            {/* Edit avatar (re-upload) */}
+            <button
+              className="p-2 rounded-full bg-white/10 hover:bg-white/20"
+              aria-label="Edit avatar"
+              title="Edit avatar"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarUpdating}
+            >
+              <Pencil className="w-5 h-5" />
+            </button>
             <button onClick={handleSignOut} className="p-2 rounded-full bg-white/10 hover:bg-white/20" aria-label="Sign out">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
+          {/* Hidden file input for avatar re-upload */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0]
+              if (!file || !effectiveUser?.email) return
+              if (file.size > 5 * 1024 * 1024) { // 5MB limit
+                toast.error('File too large. Max 5MB.')
+                return
+              }
+              try {
+                setAvatarUpdating(true)
+                const reader = new FileReader()
+                reader.onload = async () => {
+                  try {
+                    const dataUrl = reader.result
+                    const { url, error } = await uploadAvatarDataUrl(effectiveUser.email, dataUrl)
+                    if (error) {
+                      throw error
+                    }
+                    toast.success('Profile image updated')
+                    // Bust cache to show fresh image immediately
+                    setAvatarOverride((url || avatarUrlBase) + `?t=${Date.now()}`)
+                    try {
+                      const { error: profErr } = await upsertProfileByEmail(effectiveUser.email, { avatarUrl: url, userId: effectiveUser.id })
+                      if (profErr) {
+                        throw profErr
+                      }
+                      setProfile(p => ({ ...(p || {}), avatar_url: url }))
+                    } catch (e) {
+                      console.warn('Profile upsert failed', e)
+                      toast.warning('Saved image, but profile record did not update')
+                    }
+                  } catch (err) {
+                    console.error('Avatar update failed', err)
+                    toast.error('Failed to update avatar')
+                  } finally {
+                    setAvatarUpdating(false)
+                  }
+                }
+                reader.readAsDataURL(file)
+              } catch (err) {
+                setAvatarUpdating(false)
+                console.error('Avatar read failed', err)
+                toast.error('Unable to read selected file')
+              }
+            }}
+          />
       </div>
       {/* Budget Cards Section */}
         <div className="mt-6">
@@ -364,7 +532,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
       )}
 
       {/* Recent Expenses scrollable area */}
-      <div className="flex-1 overflow-y-auto scroll-smooth px-4 pb-6">
+      <div ref={recentScrollRef} className="flex-1 overflow-y-auto scroll-smooth px-4 pb-6">
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-xl shadow">
           <div className="relative flex items-center mb-3 gap-2">
             <h3 className="font-semibold">Recent Expenses</h3>
@@ -414,7 +582,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
             </div>
           </div>
           <div className="space-y-2">
-            {applyRecentFilters(recent).map((r) => {
+            {filteredRecent.slice(0, recentVisibleCount).map((r) => {
               const catItem = (categories || []).find(c => c.id === r.category_id)
               const catName = catItem?.name || 'Category'
               const CatIcon = getCategoryIcon(catName)
@@ -436,8 +604,12 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
                 </div>
               )
             })}
-            {applyRecentFilters(recent).length === 0 && (
+            {filteredRecent.length === 0 && (
               <div className="text-sm text-gray-500">No recent expenses</div>
+            )}
+            {/* Sentinel for infinite loading */}
+            {filteredRecent.length > recentVisibleCount && (
+              <div ref={recentSentinelRef} className="h-8 grid place-items-center text-xs text-gray-500">Loading more…</div>
             )}
           </div>
         </div>
