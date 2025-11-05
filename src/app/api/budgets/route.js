@@ -69,6 +69,7 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    const admin = getAdmin()
     const body = await req.json()
     const userId = String(body?.userId || '').trim()
     const categoryId = String(body?.categoryId || '').trim()
@@ -78,15 +79,36 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Missing userId or categoryId' }, { status: 400 })
     }
 
-    const { data, error } = await admin
+    // Manual upsert to avoid dependency on a specific unique constraint existing in DB
+    const { data: existing, error: selErr } = await admin
       .from('budgets')
-      .upsert({ user_id: userId, category_id: categoryId, period, amount }, { onConflict: 'user_id,category_id,period' })
-      .select('id, user_id, category_id, period, amount')
-      .single()
+      .select('id')
+      .eq('user_id', userId)
+      .eq('category_id', categoryId)
+      .eq('period', period)
+      .maybeSingle()
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    return NextResponse.json(data, { status: 200 })
+    if (selErr) return NextResponse.json({ error: selErr.message }, { status: 400 })
+
+    if (existing?.id) {
+      const { data, error } = await admin
+        .from('budgets')
+        .update({ amount })
+        .eq('id', existing.id)
+        .select('id, user_id, category_id, period, amount')
+        .single()
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      return NextResponse.json(data, { status: 200 })
+    } else {
+      const { data, error } = await admin
+        .from('budgets')
+        .insert({ user_id: userId, category_id: categoryId, period, amount })
+        .select('id, user_id, category_id, period, amount')
+        .single()
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+      return NextResponse.json(data, { status: 200 })
+    }
   } catch (err) {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    return NextResponse.json({ error: err?.message || 'Server error' }, { status: 500 })
   }
 }

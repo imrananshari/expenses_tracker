@@ -95,6 +95,7 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    const admin = getAdmin()
     const body = await req.json()
     const userId = String(body?.userId || '').trim()
     const nameRaw = String(body?.name || '').trim()

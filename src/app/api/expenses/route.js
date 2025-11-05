@@ -42,6 +42,7 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    const admin = getAdmin()
     const body = await req.json()
     const userId = String(body?.userId || '')
     const categoryId = String(body?.categoryId || '')
