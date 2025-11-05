@@ -2,11 +2,15 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import crypto from 'crypto'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 const pepper = process.env.MPIN_PEPPER || ''
 
-const admin = createClient(supabaseUrl || '', serviceRoleKey || '')
+function getAdmin() {
+  if (!supabaseUrl) throw new Error('Missing SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL')
+  if (!serviceRoleKey) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY')
+  return createClient(supabaseUrl, serviceRoleKey)
+}
 
 function hashMpin(email, mpin) {
   return crypto.createHash('sha256').update(`${email}:${mpin}:${pepper}`).digest('hex')
@@ -17,6 +21,7 @@ export async function POST(req) {
     return NextResponse.json({ error: 'Missing service role key' }, { status: 500 })
   }
   try {
+    const admin = getAdmin()
     const body = await req.json()
     const { email, mpin } = body || {}
     const cleanEmail = (email || '').trim().toLowerCase()

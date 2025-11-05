@@ -3,16 +3,21 @@ import { createClient } from '@supabase/supabase-js'
 
 export const runtime = 'nodejs'
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-const admin = createClient(SUPABASE_URL || '', SUPABASE_SERVICE_ROLE_KEY || '')
+function getAdmin() {
+  if (!SUPABASE_URL) throw new Error('Missing SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL')
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY')
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+}
 
 export async function POST(req) {
   if (!SUPABASE_SERVICE_ROLE_KEY) {
     return NextResponse.json({ error: 'Missing service role key' }, { status: 500 })
   }
   try {
+    const admin = getAdmin()
     const body = await req.json()
     const email = String(body?.email || '').trim().toLowerCase()
     const name = String(body?.name || '').trim()

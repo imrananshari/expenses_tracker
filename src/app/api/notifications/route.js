@@ -3,9 +3,14 @@ import { createClient } from '@supabase/supabase-js'
 
 export const runtime = 'nodejs'
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
-const admin = createClient(SUPABASE_URL || '', SUPABASE_SERVICE_ROLE_KEY || '')
+
+function getAdmin() {
+  if (!SUPABASE_URL) throw new Error('Missing SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL')
+  if (!SUPABASE_SERVICE_ROLE_KEY) throw new Error('Missing SUPABASE_SERVICE_ROLE_KEY')
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+}
 
 function monthStartISO(d = new Date()) {
   const s = new Date(d.getFullYear(), d.getMonth(), 1)
@@ -14,6 +19,7 @@ function monthStartISO(d = new Date()) {
 
 export async function GET(req) {
   try {
+    const admin = getAdmin()
     const { searchParams } = new URL(req.url)
     const userId = searchParams.get('userId')
     if (!userId) return NextResponse.json({ error: 'Missing userId' }, { status: 400 })
