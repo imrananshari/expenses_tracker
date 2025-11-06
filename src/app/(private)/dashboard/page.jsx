@@ -5,11 +5,12 @@ import Link from 'next/link'
 import client from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
   import { toast } from 'sonner'
-import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil } from 'lucide-react'
+import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, Settings } from 'lucide-react'
 import { getUserCategories, getBudgetsForMonthBulk, listRecentExpenses, addCategory, listNotifications, maybeGetAvatarUrlForEmail, getPublicAvatarUrl, uploadAvatarDataUrl, getProfileForUser, upsertProfileByEmail } from '@/api/db'
 import LoadingOverlay from '@/app/components/LoadingOverlay'
 
   const Dashboard = () => {
+  const addBuster = (u) => (u ? u + (u.includes('?') ? '&' : '?') + 't=' + Date.now() : '')
   const router = useRouter()
   const { user, loading, signOut } = useAuth()
   const [sessionUser, setSessionUser] = useState(null)
@@ -104,10 +105,10 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
       try {
         // Prefer profile-provided URL; else try public URLs by extension
         if (profile?.avatar_url) {
-          setAvatarOverride(profile.avatar_url)
+          setAvatarOverride(addBuster(profile.avatar_url))
           return
         }
-        const firstUrl = getPublicAvatarUrl(effectiveUser.email, avatarExts[0])
+        const firstUrl = addBuster(getPublicAvatarUrl(effectiveUser.email, avatarExts[0]))
         setAvatarTryIndex(0)
         setAvatarOverride(firstUrl || '')
       } catch {
@@ -318,7 +319,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
                   const next = avatarTryIndex + 1
                   if (next < avatarExts.length && effectiveUser?.email) {
                     setAvatarTryIndex(next)
-                    setAvatarOverride(getPublicAvatarUrl(effectiveUser.email, avatarExts[next]) || '')
+                    setAvatarOverride(addBuster(getPublicAvatarUrl(effectiveUser.email, avatarExts[next])) || '')
                   } else {
                     setAvatarOverride('')
                   }
@@ -347,71 +348,19 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
                 </span>
               )}
             </button>
-            {/* Edit avatar (re-upload) */}
+            {/* Settings */}
             <button
               className="p-2 rounded-full bg-white/10 hover:bg-white/20"
-              aria-label="Edit avatar"
-              title="Edit avatar"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={avatarUpdating}
+              aria-label="Settings"
+              title="Settings"
+              onClick={() => router.push('/dashboard/settings')}
             >
-              <Pencil className="w-5 h-5" />
+              <Settings className="w-5 h-5" />
             </button>
             <button onClick={handleSignOut} className="p-2 rounded-full bg-white/10 hover:bg-white/20" aria-label="Sign out">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
-          {/* Hidden file input for avatar re-upload */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={async (e) => {
-              const file = e.target.files?.[0]
-              if (!file || !effectiveUser?.email) return
-              if (file.size > 5 * 1024 * 1024) { // 5MB limit
-                toast.error('File too large. Max 5MB.')
-                return
-              }
-              try {
-                setAvatarUpdating(true)
-                const reader = new FileReader()
-                reader.onload = async () => {
-                  try {
-                    const dataUrl = reader.result
-                    const { url, error } = await uploadAvatarDataUrl(effectiveUser.email, dataUrl)
-                    if (error) {
-                      throw error
-                    }
-                    toast.success('Profile image updated')
-                    // Bust cache to show fresh image immediately
-                    setAvatarOverride((url || avatarUrlBase) + `?t=${Date.now()}`)
-                    try {
-                      const { error: profErr } = await upsertProfileByEmail(effectiveUser.email, { avatarUrl: url, userId: effectiveUser.id })
-                      if (profErr) {
-                        throw profErr
-                      }
-                      setProfile(p => ({ ...(p || {}), avatar_url: url }))
-                    } catch (e) {
-                      console.warn('Profile upsert failed', e)
-                      toast.warning('Saved image, but profile record did not update')
-                    }
-                  } catch (err) {
-                    console.error('Avatar update failed', err)
-                    toast.error('Failed to update avatar')
-                  } finally {
-                    setAvatarUpdating(false)
-                  }
-                }
-                reader.readAsDataURL(file)
-              } catch (err) {
-                setAvatarUpdating(false)
-                console.error('Avatar read failed', err)
-                toast.error('Unable to read selected file')
-              }
-            }}
-          />
       </div>
       {/* Budget Cards Section */}
         <div className="mt-6">
@@ -593,7 +542,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
                       <CatIcon className="w-4 h-4 text-white" />
                     </span>
                     <div className="leading-tight">
-                      <div className="text-sm font-medium">{r.note || 'Expense'}</div>
+                      <div className="text-sm font-medium">{r.note || 'Expense'}{r.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
                       <div className="text-[11px] text-black">{catName}{r.payee ? ` • ${r.payee}` : ''}</div>
                     </div>
                   </div>

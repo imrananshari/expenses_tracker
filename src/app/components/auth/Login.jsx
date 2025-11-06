@@ -14,14 +14,23 @@ const Login = () => {
   const [resendLoading, setResendLoading] = useState(false)
   const [showReset, setShowReset] = useState(false)
   const [resetLoading, setResetLoading] = useState(false)
-  const [method, setMethod] = useState('password') // 'password' | 'mpin'
+  const [method, setMethod] = useState('mpin') // default to M-PIN
   const router = useRouter()
+
+  const stripTags = (s) => s.replace(/<[^>]*>/g, '')
+  const hasDangerous = (s) => /(?:javascript:|data:|https?:\/\/|<[^>]*>)/i.test(s)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setLoading(true)
     try {
-      const cleanEmail = email.trim().toLowerCase()
+      let cleanEmail = email.trim().toLowerCase()
+      if (hasDangerous(cleanEmail)) {
+        toast.error('Invalid characters detected in email')
+        setLoading(false)
+        return
+      }
+      cleanEmail = stripTags(cleanEmail)
       // Basic client-side validation to catch obvious issues
       const simpleEmailPattern = /.+@.+\..+/
       if (!simpleEmailPattern.test(cleanEmail)) {
@@ -148,20 +157,6 @@ const Login = () => {
 
   return (
     <div className="space-y-4">
-      {/* Method toggle */}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={() => setMethod('password')}
-          className={`px-3 py-2 rounded-md text-sm ${method === 'password' ? 'btn-primary' : 'btn-secondary'}`}
-        >Password</button>
-        <button
-          type="button"
-          onClick={() => setMethod('mpin')}
-          className={`px-3 py-2 rounded-md text-sm ${method === 'mpin' ? 'btn-primary' : 'btn-secondary'}`}
-        >M-PIN</button>
-      </div>
-
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <label htmlFor="email" className="text-sm font-medium">
@@ -184,7 +179,7 @@ const Login = () => {
               id="password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => setPassword(stripTags(e.target.value))}
               className="w-full px-3 py-2 border rounded-md border-input bg-background"
               placeholder="••••••••"
               required
@@ -208,6 +203,21 @@ const Login = () => {
             <p className="text-xs text-muted-foreground">Login using email + M-PIN (no password). Any 4-digit code works.</p>
           </div>
         )}
+        {/* Method toggle below email and credential field */}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setMethod('mpin')}
+            className={`px-3 py-2 rounded-md text-sm ${method === 'mpin' ? 'btn-primary' : 'btn-secondary'}`}
+            aria-label="Use M-PIN"
+          >M-PIN</button>
+          <button
+            type="button"
+            onClick={() => setMethod('password')}
+            className={`px-3 py-2 rounded-md text-sm ${method === 'password' ? 'btn-primary' : 'btn-secondary'}`}
+            aria-label="Use Password"
+          >Password</button>
+        </div>
         <button
           type="submit"
           className="w-full btn-primary"

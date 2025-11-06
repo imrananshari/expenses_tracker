@@ -4,7 +4,7 @@ import { useRouter, useParams } from 'next/navigation'
 import client from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
-import { getCategoryBySlug, getBudgetForMonth, upsertBudget, listExpenses, addExpense } from '@/api/db'
+import { getCategoryBySlug, getBudgetForMonth, upsertBudget, listExpenses, addExpense, updateExpense } from '@/api/db'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import LoadingOverlay from '@/app/components/LoadingOverlay'
 
@@ -13,7 +13,7 @@ import BudgetForm from '@/app/components/budget/BudgetForm'
 import ExpenseForm from '@/app/components/budget/ExpenseForm'
 import MiniSpendChart from '@/app/components/budget/MiniSpendChart'
 // Mobile redesign uses custom list rows instead of table summary
-import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle } from 'lucide-react'
+import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil } from 'lucide-react'
 
 const CategoryPage = () => {
   const router = useRouter()
@@ -33,6 +33,7 @@ const CategoryPage = () => {
   const [showBudgetForm, setShowBudgetForm] = useState(false)
   const [budgetLoading, setBudgetLoading] = useState(true)
   const [showExpenseModal, setShowExpenseModal] = useState(false)
+  const [editingExpense, setEditingExpense] = useState(null)
   const [showTopupModal, setShowTopupModal] = useState(false)
   const [topupForm, setTopupForm] = useState({ amount: '', date: '', reason: '', type: '' })
   const [addingTopup, setAddingTopup] = useState(false)
@@ -47,6 +48,8 @@ const CategoryPage = () => {
     buying: { dateFrom: '', dateTo: '' },
     labour: { dateFrom: '', dateTo: '' }
   })
+  // Track which tab is selected in the category page
+  const [activeTab, setActiveTab] = useState('buying')
   const [datePopoverOpen, setDatePopoverOpen] = useState({ buying: false, labour: false })
 
   // Loader visibility with minimum display time
@@ -55,8 +58,19 @@ const CategoryPage = () => {
 
   // Derived totals for budget alert in the top bar
   const isHomeBuilding = (category?.name || '').toLowerCase().includes('home')
-  const totalBuying = (expensesBuying || []).reduce((sum, e) => sum + Number(e.amount || 0), 0)
-  const totalLabourRaw = (expensesLabour || []).reduce((sum, e) => sum + Number(e.amount || 0), 0)
+  // Restrict totals to current month so Remaining reflects this month’s budget
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const sumThisMonth = (items) => (items || []).reduce((sum, e) => {
+    const d = e?.date ? new Date(e.date) : null
+    if (d && d >= monthStart && d < monthEnd) {
+      return sum + Number(e.amount || 0)
+    }
+    return sum
+  }, 0)
+  const totalBuying = sumThisMonth(expensesBuying)
+  const totalLabourRaw = sumThisMonth(expensesLabour)
   const totalLabour = isHomeBuilding ? totalLabourRaw : 0
   const totalSpent = totalBuying + totalLabour
   const overspent = Math.max(0, totalSpent - Number(budget || 0))
@@ -109,8 +123,8 @@ const CategoryPage = () => {
         if (buyErr) console.error(buyErr)
         if (labErr) console.error(labErr)
         if (topupErr) console.error(topupErr)
-        const buyMapped = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying' }))
-        const labMapped = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour' }))
+        const buyMapped = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited) }))
+        const labMapped = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited) }))
         const topMapped = (topupRows || []).map(e => ({ id: e.id, reason: e.note || 'Added amount', type: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'topup' }))
         setExpensesBuying(buyMapped)
         setExpensesLabour(labMapped)
@@ -222,7 +236,7 @@ const CategoryPage = () => {
       toast.error(error.message)
       return
     }
-    const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind }
+    const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited) }
     if (mapped.kind === 'labour') {
       setExpensesLabour([mapped, ...expensesLabour])
     } else {
@@ -243,6 +257,33 @@ const CategoryPage = () => {
         { id: `freq-${category.slug}`, type: 'frequent', title: 'Frequent spending', message: `${recentCount} expenses in the last 7 days.`, categorySlug: category.slug, severity: 'warning', date: new Date().toISOString() }
       ]))
     }
+  }
+
+  const handleExpenseEdited = async (expense) => {
+    if (!category || !user || !editingExpense) return
+    const payload = {
+      id: editingExpense.id,
+      amount: expense.amount,
+      note: expense.name,
+      payee: expense.payee,
+      kind: editingExpense.kind,
+      spentAt: expense.date,
+    }
+    const { data, error } = await updateExpense(user.id, payload)
+    if (error) {
+      console.error(error)
+      toast.error(error.message)
+      return
+    }
+    const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited) }
+    if (mapped.kind === 'labour') {
+      setExpensesLabour(prev => prev.map(e => e.id === mapped.id ? { ...mapped, edited: true } : e))
+    } else {
+      setExpensesBuying(prev => prev.map(e => e.id === mapped.id ? { ...mapped, edited: true } : e))
+    }
+    // Edited flag now comes from API; no local storage tracking
+    setEditingExpense(null)
+    setShowExpenseModal(false)
   }
 
   // Top-up budget modal and submission
@@ -526,7 +567,7 @@ const CategoryPage = () => {
             {/* Add Expense button between topbar and tabs */}
             <div className="mb-3">
               <button
-                onClick={() => { setActiveKind('buying'); setShowExpenseModal(true) }}
+                onClick={() => { setActiveKind(isHomeBuilding ? activeTab : 'buying'); setShowExpenseModal(true) }}
                 className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-dark text-white py-3 ring-1 ring-[var(--brand-primary)]/30"
                 aria-label="Add new expense"
               >
@@ -535,7 +576,7 @@ const CategoryPage = () => {
               </button>
             </div>
 
-            <Tabs defaultValue="buying" className="w-full">
+            <Tabs value={activeTab} onValueChange={(v)=>setActiveTab(v)} className="w-full">
               <TabsList className={`grid w-full ${isHomeBuilding ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <TabsTrigger value="buying">Buying Expenses</TabsTrigger>
                 {isHomeBuilding && (<TabsTrigger value="labour">Labour Expenses</TabsTrigger>)}
@@ -579,13 +620,23 @@ const CategoryPage = () => {
                             <CatIcon className="w-4 h-4 text-white" />
                           </span>
                           <div className="leading-tight">
-                            <div className="text-sm font-medium">{e.name || 'Expense'}</div>
+                            <div className="text-sm font-medium">{e.name || 'Expense'}{e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
                             <div className="text-[11px] text-black">{category?.name}{e.payee ? ` • ${e.payee}` : ''}</div>
                           </div>
                         </div>
-                        <div className="text-right leading-tight">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="p-1 rounded-md bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200"
+                            title="Edit"
+                            onClick={() => { setEditingExpense(e); setActiveKind(e.kind); setShowExpenseModal(true) }}
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <div className="text-right leading-tight">
                           <div className="text-sm font-semibold text-[var(--amount-green)]">₹{Number(e.amount).toLocaleString()}</div>
                           <div className="text-[11px] text-gray-500">{new Date(e.date).toLocaleDateString()}</div>
+                          </div>
                         </div>
                       </div>
                     )
@@ -639,13 +690,23 @@ const CategoryPage = () => {
                             <CatIcon className="w-4 h-4 text-white" />
                           </span>
                           <div className="leading-tight">
-                            <div className="text-sm font-medium">{e.name || 'Expense'}</div>
+                            <div className="text-sm font-medium">{e.name || 'Expense'}{e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
                             <div className="text-[11px] text-black">{category?.name}{e.payee ? ` • ${e.payee}` : ''}</div>
                           </div>
                         </div>
-                        <div className="text-right leading-tight">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            className="p-1 rounded-md bg-gray-100 dark:bg-zinc-700 hover:bg-gray-200"
+                            title="Edit"
+                            onClick={() => { setEditingExpense(e); setActiveKind(e.kind); setShowExpenseModal(true) }}
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <div className="text-right leading-tight">
                           <div className="text-sm font-semibold text-[var(--amount-green)]">₹{Number(e.amount).toLocaleString()}</div>
                           <div className="text-[11px] text-gray-500">{new Date(e.date).toLocaleDateString()}</div>
+                          </div>
                         </div>
                       </div>
                     )
@@ -665,13 +726,13 @@ const CategoryPage = () => {
         )}
       </div>
 
-      {/* Modal for Add New Expense */}
+      {/* Modal for Add / Edit Expense */}
       {showExpenseModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
           <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4">
             <div className="flex items-center justify-between mb-3">
-              <h4 className="font-semibold">Add New Expense</h4>
-              <button onClick={() => setShowExpenseModal(false)} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">
+              <h4 className="font-semibold">{editingExpense ? 'Edit Expense' : 'Add New Expense'}</h4>
+              <button onClick={() => { setShowExpenseModal(false); setEditingExpense(null) }} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -693,8 +754,11 @@ const CategoryPage = () => {
             </div>
             <ExpenseForm 
               categoryId={category.id} 
-              onExpenseAdded={handleExpenseAdded} 
-              kind={isHomeBuilding ? activeKind : 'buying'}
+              onExpenseAdded={handleExpenseAdded}
+              onExpenseEdited={handleExpenseEdited}
+              initialExpense={editingExpense ? { id: editingExpense.id, name: editingExpense.name, payee: editingExpense.payee || '', amount: editingExpense.amount, date: editingExpense.date } : undefined}
+              mode={editingExpense ? 'edit' : 'add'}
+              kind={editingExpense ? editingExpense.kind : (isHomeBuilding ? activeKind : 'buying')}
               payeeLabel={activeKind === 'labour' ? 'Labour Name' : 'Where/Who (shop)'}
             />
           </div>

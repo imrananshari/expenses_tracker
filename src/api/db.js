@@ -167,6 +167,36 @@ export async function addExpense(userId, { categoryId, budgetId, amount, note, p
   }
 }
 
+export async function updateExpense(userId, { id, amount, note, payee, kind, spentAt, budgetId }) {
+  try {
+    const res = await fetch('/api/expenses', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, id, amount, note, payee, kind, spentAt, budgetId }),
+    })
+    const json = await res.json()
+    if (!res.ok || json?.error) return { data: null, error: new Error(json?.error || 'Failed to update expense') }
+    return { data: json, error: null }
+  } catch (err) {
+    return { data: null, error: err }
+  }
+}
+
+export async function deleteExpense(userId, id) {
+  try {
+    const res = await fetch('/api/expenses', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, id }),
+    })
+    const json = await res.json()
+    if (!res.ok || json?.error) return { ok: false, error: new Error(json?.error || 'Failed to delete expense') }
+    return { ok: true, error: null }
+  } catch (err) {
+    return { ok: false, error: err }
+  }
+}
+
 // Avatar helpers
 export async function uploadAvatarDataUrl(email, dataUrl) {
   try {

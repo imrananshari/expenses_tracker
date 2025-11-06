@@ -24,7 +24,7 @@ export async function GET(req) {
 
     let query = admin
       .from('expenses')
-      .select('id, user_id, category_id, budget_id, amount, note, payee, kind, spent_at')
+      .select('id, user_id, category_id, budget_id, amount, note, payee, kind, spent_at, is_edited')
       .eq('user_id', userId)
 
     if (categoryId) query = query.eq('category_id', categoryId)
@@ -34,7 +34,11 @@ export async function GET(req) {
 
     const { data, error } = await query
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    return NextResponse.json({ data: data || [] }, { status: 200 })
+    const withEdited = (data || []).map((d) => {
+      const { is_edited, ...rest } = d
+      return { ...rest, edited: Boolean(is_edited) }
+    })
+    return NextResponse.json({ data: withEdited }, { status: 200 })
   } catch (err) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
@@ -59,11 +63,67 @@ export async function POST(req) {
     const { data, error } = await admin
       .from('expenses')
       .insert([{ user_id: userId, category_id: categoryId, budget_id: budgetId, amount, note, payee, kind, spent_at: spentAt || undefined }])
-      .select('id, user_id, category_id, budget_id, amount, note, payee, kind, spent_at')
+      .select('id, user_id, category_id, budget_id, amount, note, payee, kind, spent_at, is_edited')
       .single()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    return NextResponse.json(data, { status: 200 })
+    const { is_edited, ...rest } = data
+    return NextResponse.json({ ...rest, edited: Boolean(is_edited) }, { status: 200 })
+  } catch (err) {
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
+}
+
+export async function PATCH(req) {
+  try {
+    const admin = getAdmin()
+    const body = await req.json()
+    const userId = String(body?.userId || '')
+    const id = body?.id
+    if (!userId || !id) {
+      return NextResponse.json({ error: 'Missing userId or id' }, { status: 400 })
+    }
+    const update = {}
+    if (typeof body?.amount !== 'undefined') update.amount = Number(body.amount)
+    if (typeof body?.note !== 'undefined') update.note = body.note || null
+    if (typeof body?.payee !== 'undefined') update.payee = body.payee || null
+    if (typeof body?.kind !== 'undefined') update.kind = body.kind
+    if (typeof body?.spentAt !== 'undefined') update.spent_at = body.spentAt || null
+    if (typeof body?.budgetId !== 'undefined') update.budget_id = body.budgetId || null
+    // Persist edited flag
+    update.is_edited = true
+
+    const { data, error } = await admin
+      .from('expenses')
+      .update(update)
+      .eq('user_id', userId)
+      .eq('id', id)
+      .select('id, user_id, category_id, budget_id, amount, note, payee, kind, spent_at, is_edited')
+      .single()
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    const { is_edited, ...rest } = data
+    return NextResponse.json({ ...rest, edited: Boolean(is_edited) }, { status: 200 })
+  } catch (err) {
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+  }
+}
+
+export async function DELETE(req) {
+  try {
+    const admin = getAdmin()
+    const body = await req.json()
+    const userId = String(body?.userId || '')
+    const id = body?.id
+    if (!userId || !id) {
+      return NextResponse.json({ error: 'Missing userId or id' }, { status: 400 })
+    }
+    const { error } = await admin
+      .from('expenses')
+      .delete()
+      .eq('user_id', userId)
+      .eq('id', id)
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    return NextResponse.json({ ok: true }, { status: 200 })
   } catch (err) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }

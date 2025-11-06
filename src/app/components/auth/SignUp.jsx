@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Upload, Pencil } from 'lucide-react'
 
-const SignUp = ({ onBack }) => {
+const SignUp = ({ onBack, onSignupSuccess }) => {
   const [step, setStep] = useState(1) // 1: avatar+name+email, 2: passwords+mpin
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -106,14 +106,28 @@ const SignUp = ({ onBack }) => {
 
   const handleNext = () => {
     // Basic validations for step 1
-    const cleanEmail = email.trim().toLowerCase()
+    const stripTags = (s) => s.replace(/<[^>]*>/g, '')
+    const hasDangerous = (s) => /(?:javascript:|data:|https?:\/\/|<[^>]*>)/i.test(s)
+    const cleanEmail = stripTags(email.trim().toLowerCase())
     const simpleEmailPattern = /.+@.+\..+/
     if (!name.trim()) {
       toast.error('Please enter your name')
       return
     }
+    if (hasDangerous(name)) {
+      toast.error('Invalid characters in name')
+      return
+    }
     if (!simpleEmailPattern.test(cleanEmail)) {
       toast.error('Please enter a valid email address')
+      return
+    }
+    if (hasDangerous(cleanEmail)) {
+      toast.error('Invalid characters in email')
+      return
+    }
+    if (!rawUrl) {
+      toast.error('Please upload a photo')
       return
     }
     // Generate avatar data URL (optional)
@@ -127,10 +141,17 @@ const SignUp = ({ onBack }) => {
     setLoading(true)
     
     try {
-      const cleanEmail = email.trim().toLowerCase()
+      const stripTags = (s) => s.replace(/<[^>]*>/g, '')
+      const hasDangerous = (s) => /(?:javascript:|data:|https?:\/\/|<[^>]*>)/i.test(s)
+      const cleanEmail = stripTags(email.trim().toLowerCase())
       const simpleEmailPattern = /.+@.+\..+/
       if (!simpleEmailPattern.test(cleanEmail)) {
         toast.error('Please enter a valid email address')
+        setLoading(false)
+        return
+      }
+      if (hasDangerous(cleanEmail)) {
+        toast.error('Invalid characters in email')
         setLoading(false)
         return
       }
@@ -140,18 +161,28 @@ const SignUp = ({ onBack }) => {
         setLoading(false)
         return
       }
+      if (hasDangerous(password)) {
+        toast.error('Invalid characters in password')
+        setLoading(false)
+        return
+      }
       if (password !== confirmPassword) {
         toast.error('Passwords do not match')
         setLoading(false)
         return
       }
-      if (mpin && !/^\d{4}$/.test(mpin.trim())) {
+      if (!/^\d{4}$/.test((mpin || '').trim())) {
         toast.error('M-PIN must be 4 digits')
         setLoading(false)
         return
       }
-      if (mpin && mpin.trim() !== confirmMpin.trim()) {
+      if ((mpin || '').trim() !== (confirmMpin || '').trim()) {
         toast.error('M-PIN does not match')
+        setLoading(false)
+        return
+      }
+      if (!avatarDataUrl) {
+        toast.error('Please upload a photo')
         setLoading(false)
         return
       }
@@ -209,6 +240,13 @@ const SignUp = ({ onBack }) => {
           }
         }
         setJustSignedUp(true)
+        // Navigate into login page after successful sign-up
+        if (onSignupSuccess) {
+          onSignupSuccess()
+        } else {
+          // fallback: go to home where Auth shows login by default
+          router.replace('/')
+        }
       }
     } catch (err) {
       toast.error('An unexpected error occurred. Please try again.')
@@ -377,7 +415,7 @@ const SignUp = ({ onBack }) => {
 
           {/* M-PIN + confirm with eye toggles */}
           <div className="space-y-2">
-            <label htmlFor="mpin" className="text-sm font-medium">Set 4-digit M-PIN (optional)</label>
+            <label htmlFor="mpin" className="text-sm font-medium">Set 4-digit M-PIN</label>
             <div className="relative">
               <input
                 id="mpin"
@@ -390,6 +428,7 @@ const SignUp = ({ onBack }) => {
                 className="w-full px-3 py-2 border rounded-md border-input bg-background pr-10"
                 placeholder="••••"
                 disabled={loading}
+                required
               />
               <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 p-1" onClick={() => setShowMpin(v => !v)} aria-label="Toggle M-PIN visibility">
                 {showMpin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -411,6 +450,7 @@ const SignUp = ({ onBack }) => {
                 className="w-full px-3 py-2 border rounded-md border-input bg-background pr-10"
                 placeholder="••••"
                 disabled={loading}
+                required
               />
               <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 p-1" onClick={() => setShowConfirmMpin(v => !v)} aria-label="Toggle confirm M-PIN visibility">
                 {showConfirmMpin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

@@ -23,6 +23,12 @@ function normalizeMonthStart(dateStr) {
   return s.toISOString().slice(0, 10)
 }
 
+function nextMonthStartISO(period) {
+  const d = period ? new Date(period) : new Date()
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 1)
+  return end.toISOString().slice(0, 10)
+}
+
 export async function GET(req) {
   try {
     const admin = getAdmin()
@@ -48,7 +54,30 @@ export async function GET(req) {
         .in('category_id', ids)
         .eq('period', period)
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-      return NextResponse.json({ data: data || [] }, { status: 200 })
+      const foundByCat = new Map((data || []).map(b => [String(b.category_id), b]))
+      const end = nextMonthStartISO(period)
+      // Carry-forward fallback: fill missing categories with latest earlier budget
+      const results = []
+      for (const id of ids) {
+        const existing = foundByCat.get(String(id))
+        if (existing) {
+          results.push({ ...existing, sourcePeriod: existing.period, carriedForward: false })
+          continue
+        }
+        const { data: fb, error: fbErr } = await admin
+          .from('budgets')
+          .select('id, user_id, category_id, period, amount')
+          .eq('user_id', userId)
+          .eq('category_id', id)
+          .lt('period', end)
+          .order('period', { ascending: false })
+          .limit(1)
+        if (!fbErr && Array.isArray(fb) && fb.length) {
+          // Return the fallback row as-is (period reflects its original month)
+          results.push({ ...fb[0], sourcePeriod: fb[0].period, carriedForward: true })
+        }
+      }
+      return NextResponse.json({ data: results }, { status: 200 })
     }
 
     // Single category fetch
@@ -61,7 +90,22 @@ export async function GET(req) {
       .maybeSingle()
 
     if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-    return NextResponse.json({ data: data || null }, { status: 200 })
+    if (data) return NextResponse.json({ data: { ...data, sourcePeriod: data.period, carriedForward: false } }, { status: 200 })
+
+    // Carry-forward fallback: use latest earlier budget when the month has no entry
+    const end = nextMonthStartISO(period)
+    const { data: fb, error: fbErr } = await admin
+      .from('budgets')
+      .select('id, user_id, category_id, period, amount')
+      .eq('user_id', userId)
+      .eq('category_id', categoryId)
+      .lt('period', end)
+      .order('period', { ascending: false })
+      .limit(1)
+
+    if (fbErr) return NextResponse.json({ error: fbErr.message }, { status: 400 })
+    const fallback = Array.isArray(fb) && fb.length ? { ...fb[0], sourcePeriod: fb[0].period, carriedForward: true } : null
+    return NextResponse.json({ data: fallback }, { status: 200 })
   } catch (err) {
     return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }

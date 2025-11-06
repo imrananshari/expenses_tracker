@@ -3,40 +3,47 @@ import React, { useState } from 'react'
 import { ShoppingCart, Hammer } from 'lucide-react'
 import { toast } from 'sonner'
 
-const ExpenseForm = ({ categoryId, onExpenseAdded, kind = 'buying', payeeLabel = 'Where/Who (shop or receiver)' }) => {
-  const [expenseName, setExpenseName] = useState('')
-  const [payee, setPayee] = useState('')
-  const [expenseAmount, setExpenseAmount] = useState('')
-  const [expenseDate, setExpenseDate] = useState('')
+const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpense, mode = 'add', kind = 'buying', payeeLabel = 'Where/Who (shop or receiver)' }) => {
+  const [expenseName, setExpenseName] = useState(initialExpense?.name || '')
+  const [payee, setPayee] = useState(initialExpense?.payee || '')
+  const [expenseAmount, setExpenseAmount] = useState(initialExpense?.amount ? String(initialExpense.amount) : '')
+  const [expenseDate, setExpenseDate] = useState(() => {
+    if (initialExpense?.date) {
+      try {
+        const d = new Date(initialExpense.date)
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+      } catch { return '' }
+    }
+    return ''
+  })
   const [loading, setLoading] = useState(false)
 
   const handleSubmit = (e) => {
     e.preventDefault()
     setLoading(true)
-    
-    // Simulate API call to save expense
-    setTimeout(() => {
-      // In a real app, you would save this to a database
-      const when = expenseDate ? new Date(expenseDate) : new Date()
-      const newExpense = {
-        id: Date.now().toString(),
-        name: expenseName,
-        payee: payee || undefined,
-        amount: parseFloat(expenseAmount),
-        date: when.toISOString(),
-        kind
-      }
-      
-      onExpenseAdded(newExpense)
+    const when = expenseDate ? new Date(expenseDate) : new Date()
+    const payload = {
+      id: initialExpense?.id,
+      name: expenseName,
+      payee: payee || undefined,
+      amount: parseFloat(expenseAmount),
+      date: when.toISOString(),
+      kind
+    }
+    if (mode === 'edit' && typeof onExpenseEdited === 'function') {
+      onExpenseEdited(payload)
+      toast.success('Expense updated')
+      setLoading(false)
+    } else {
+      onExpenseAdded(payload)
       toast.success(`Added expense: ${expenseName}`)
-      
       // Reset form
       setExpenseName('')
       setExpenseAmount('')
       setPayee('')
       setExpenseDate('')
       setLoading(false)
-    }, 500)
+    }
   }
 
   return (
@@ -47,7 +54,7 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, kind = 'buying', payeeLabel =
         ) : (
           <ShoppingCart className="w-5 h-5 text-[var(--brand-primary)]" />
         )}
-        <h2 className="text-xl font-semibold">{kind === 'labour' ? 'Add Labour Expense' : 'Add New Expense'}</h2>
+        <h2 className="text-xl font-semibold">{mode === 'edit' ? 'Edit Expense' : (kind === 'labour' ? 'Add Labour Expense' : 'Add New Expense')}</h2>
       </div>
       
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -120,7 +127,7 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, kind = 'buying', payeeLabel =
           className="w-full btn-primary"
           disabled={loading}
         >
-          {loading ? 'Adding...' : 'Add Expense'}
+          {loading ? (mode === 'edit' ? 'Saving...' : 'Adding...') : (mode === 'edit' ? 'Save Changes' : 'Add Expense')}
         </button>
       </form>
     </div>
