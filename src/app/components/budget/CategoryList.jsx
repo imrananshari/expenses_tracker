@@ -87,11 +87,11 @@ const CategoryList = () => {
           <div
             key={category.id}
             onClick={() => handleCategoryClick(category.id)}
-            className="flex items-center p-4 card-widget cursor-pointer hover:shadow-md transition-shadow"
+            className="group flex items-center p-4 card-widget cursor-pointer hover:shadow-md transition-shadow"
           >
-            <div className="mr-3 text-[var(--brand-primary)]">
-              {(() => { const Icon = (PREDEFINED_CATEGORIES.find(c=>c.id===category.id)?.icon) || FileText; return <Icon className="w-6 h-6 icon-bounce"/> })()}
-            </div>
+            <span className="mr-3 w-8 h-8 rounded-full chip-ring grid place-items-center">
+              {(() => { const Icon = (PREDEFINED_CATEGORIES.find(c=>c.id===category.id)?.icon) || FileText; return <Icon className="w-5 h-5 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12"/> })()}
+            </span>
             <div>
               <h3 className="font-medium">{category.name}</h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">Click to manage budget</p>

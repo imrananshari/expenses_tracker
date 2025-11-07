@@ -5,9 +5,10 @@ import Link from 'next/link'
 import client from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
   import { toast } from 'sonner'
-import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, Settings } from 'lucide-react'
+import { Bell, LogOut, IndianRupee, Plus, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, Settings, Shirt, Store, Wrench, Utensils, UtensilsCrossed } from 'lucide-react'
 import { getUserCategories, getBudgetsForMonthBulk, listRecentExpenses, addCategory, listNotifications, maybeGetAvatarUrlForEmail, getPublicAvatarUrl, uploadAvatarDataUrl, getProfileForUser, upsertProfileByEmail } from '@/api/db'
 import LoadingOverlay from '@/app/components/LoadingOverlay'
+import { useDashboardData } from '@/hooks/useDashboardData'
 
   const Dashboard = () => {
   const addBuster = (u) => (u ? u + (u.includes('?') ? '&' : '?') + 't=' + Date.now() : '')
@@ -25,10 +26,11 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   const avatarUrl = avatarOverride || avatarUrlBase
   const avatarExts = ['.jpg', '.png', '.webp']
   const [avatarTryIndex, setAvatarTryIndex] = useState(0)
+  const { categories: cachedCategories, categoryBudgets: cachedBudgets, recent: cachedRecent, notifications: cachedNotifications, loaded, initialize, setCategories: setCachedCategories, setCategoryBudgets: setCachedBudgets, setRecent: setCachedRecent, setNotifications: setCachedNotifications } = useDashboardData()
   const [walletTotal, setWalletTotal] = useState(0)
-  const [categoryBudgets, setCategoryBudgets] = useState([]) // [{name, slug, amount}]
-  const [categories, setCategories] = useState([]) // [{id, name, slug}]
-  const [recent, setRecent] = useState([]) // recent expenses
+  const [categoryBudgets, setCategoryBudgets] = useState(cachedBudgets || []) // [{name, slug, amount}]
+  const [categories, setCategories] = useState(cachedCategories || []) // [{id, name, slug}]
+  const [recent, setRecent] = useState(cachedRecent || []) // recent expenses
   const [recentFilters, setRecentFilters] = useState({ search: '', dateFrom: '', dateTo: '' })
   const [recentDateDraft, setRecentDateDraft] = useState({ dateFrom: '', dateTo: '' })
   const [recentDatePopoverOpen, setRecentDatePopoverOpen] = useState(false)
@@ -39,11 +41,27 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   const [newCatName, setNewCatName] = useState('')
   const [addingCat, setAddingCat] = useState(false)
   const scrollRef = useRef(null)
-  const [notifications, setNotifications] = useState([]) // {id,type,title,message,categorySlug,severity,date}
+  const [notifications, setNotifications] = useState(cachedNotifications || []) // {id,type,title,message,categorySlug,severity,date}
   const [showNotifications, setShowNotifications] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [overlayVisible, setOverlayVisible] = useState(true)
   const overlayStartRef = useRef(0)
+
+  // Identify Shop Store categories so they can be excluded from the main dashboard Categories list
+  const SHOP_TEMPLATES = [
+    'Cloths Garments',
+    'Grocery',
+    'Auto Spare Parts',
+    'General Store',
+    'Restaurant and Cafe',
+    'Food Shop',
+  ]
+  const templateNamesSet = useMemo(() => new Set(SHOP_TEMPLATES.map(n => n.toLowerCase())), [])
+  const isShopCategory = (c) => {
+    const nm = (c?.name || '').toLowerCase()
+    const sg = (c?.slug || '').toLowerCase()
+    return sg.startsWith('shop-') || templateNamesSet.has(nm)
+  }
 
   // Bridge: if context user not ready immediately after login, read session user
   useEffect(() => {
@@ -121,6 +139,19 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   useEffect(() => {
     const loadBudgets = async () => {
       if (!effectiveUser?.id) { setIsLoading(false); return }
+      // If we have cached data, use it and skip the heavy overlay
+      if (loaded) {
+        setCategories(cachedCategories || [])
+        setCategoryBudgets(cachedBudgets || [])
+        setRecent(cachedRecent || [])
+        setNotifications(cachedNotifications || [])
+        const sum = (cachedBudgets || []).reduce((s,b)=>s+Number(b.amount||0),0)
+        setWalletTotal(sum)
+        setOverlayVisible(false)
+        setIsLoading(false)
+        return
+      }
+
       setIsLoading(true)
       overlayStartRef.current = Date.now()
       setOverlayVisible(true)
@@ -131,8 +162,6 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
           setIsLoading(false)
           return
         }
-        setCategories(cats || [])
-
         const ids = (cats || []).map(c => c.id)
         const { data: budgetRows } = await getBudgetsForMonthBulk(effectiveUser.id, ids)
         const byCategory = new Map((budgetRows || []).map(b => [b.category_id, Number(b.amount || 0)]))
@@ -143,15 +172,16 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
           sum += amt
           return { name: c.name, slug: c.slug, amount: amt }
         })
-
         items.sort((a, b) => b.amount - a.amount)
-        setCategoryBudgets(items)
-        setWalletTotal(sum)
 
         const { data: newNotifications } = await listNotifications(effectiveUser.id)
-
-        // recent transactions across all categories (limit for faster load)
         const { data: rec } = await listRecentExpenses(effectiveUser.id, 20)
+
+        // Initialize cache and local state
+        initialize({ categories: cats || [], categoryBudgets: items, recent: rec || [], notifications: newNotifications || [] })
+        setCategories(cats || [])
+        setCategoryBudgets(items)
+        setWalletTotal(sum)
         setRecent(rec || [])
         setNotifications(newNotifications || [])
       } catch (err) {
@@ -159,7 +189,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
       } finally {
         setIsLoading(false)
         const elapsed = Date.now() - overlayStartRef.current
-        const MIN_MS = 1500
+        const MIN_MS = 800
         if (elapsed < MIN_MS) {
           setTimeout(() => setOverlayVisible(false), MIN_MS - elapsed)
         } else {
@@ -168,7 +198,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
       }
     }
     loadBudgets()
-  }, [effectiveUser?.id])
+  }, [effectiveUser?.id, loaded])
 
   // Badge uses API-derived notifications now; no localStorage syncing needed
 
@@ -204,6 +234,12 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
   // Choose an icon based on category name
   const getCategoryIcon = (name) => {
     const n = (name || '').toLowerCase()
+    // Shop store specific mappings
+    if (n.includes('cloth') || n.includes('garment')) return Shirt
+    if (n.includes('general store')) return Store
+    if (n.includes('auto') || n.includes('spare')) return Wrench
+    if (n.includes('restaurant')) return UtensilsCrossed
+    if (n.includes('food')) return Utensils
     if (n.includes('home')) return HomeIcon
     if (n.includes('grocery')) return ShoppingCart
     if (n.includes('subscription')) return CreditCard
@@ -306,7 +342,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
     <div className="max-w-md mx-auto min-h-screen flex flex-col">
       <LoadingOverlay visible={overlayVisible} />
       {/* Mobile header (12px rounded bottom with 3D shadow) */}
-      <div className="px-4 pt-6 pb-6 bg-brand-dark text-white rounded-b-xl  shadow-2xl shadow-black/30">
+      <div className="relative px-4 pt-1 pb-6 bg-brand-dark text-white shadow-2xl shadow-black/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {avatarUrl ? (
@@ -331,8 +367,8 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
               </div>
             )}
             <div>
-              <p className="text-sm opacity-80">Hello,</p>
-              <p className="text-base font-semibold capitalize">{displayName}</p>
+              <img src="/budgzyx.svg" alt="Budgzyx" className="h-28 opacity-100" />
+              {/* <p className="text-base font-semibold capitalize">{displayName}</p> */}
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -363,7 +399,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
           </div>
       </div>
       {/* Budget Cards Section */}
-        <div className="mt-6">
+        <div className="mt-">
           <div className="flex items-center justify-between">
             <p className="text-sm opacity-90">Your Budgets</p>
             <div className="flex items-center gap-2">
@@ -371,17 +407,17 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
               <span className="font-extrabold text-3xl text-[var(--amount-green)]">₹{totalBudget.toLocaleString()}</span>
             </div>
           </div>
-          <div ref={scrollRef} className="budget-cards-container overflow-x-auto no-scrollbar mt-2 px-2">
+          <div ref={scrollRef} className="budget-cards-container overflow-x-auto no-scrollbar mt-5 pb-4 px-2">
             <div className="budget-cards-scroll flex gap-4">
               {categoryBudgets
                 .filter(budget => budget.amount > 0)
                 .map((budget) => {
                   const Icon = getCategoryIcon(budget.name)
                   return (
-                <div key={budget.slug} className="budget-card flex-shrink-0 bg-brand-dark rounded-xl p-4 text-center border border-white/20">
+                <div key={budget.slug} className="budget-card group flex-shrink-0 bg-brand-dark rounded-xl p-4 text-center border border-white/20">
                   <span className="w-8 h-8 rounded-full chip-ring mx-auto mb-2 block">
                     <span className="w-full h-full rounded-full bg-brand-dark flex items-center justify-center">
-                      <Icon className="w-5 h-5 text-white" />
+                      <Icon className="w-5 h-5 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                     </span>
                   </span>
                   <div className="text-brand-soft text-xs mb-1 truncate">
@@ -397,6 +433,10 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
           {categoryBudgets.length === 0 && (
             <div className="px-3 py-2 rounded-xl bg-white/10 text-white/90 text-sm">No budgets set yet</div>
           )}
+        </div>
+        {/* Animated thin diagonal pattern (sleek) */}
+        <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-3 overflow-hidden">
+          <div className="w-full h-full bg-diagonal-pattern opacity-60 animate-pattern"></div>
         </div>
       </div>
 
@@ -415,18 +455,32 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
         </div>
         <div className="overflow-x-auto no-scrollbar mt-4 mb-2">
           <div className="flex items-center gap-5 min-w-full">
-            {categories.map((c) => {
+            {/* Static Shop Store entry */}
+            <Link
+              href="/dashboard/shop"
+              prefetch
+              className="group inline-flex flex-col items-center transition-colors hover:brightness-105 select-none"
+              title="Shop Store"
+            >
+              <span className="w-14 h-14 rounded-full chip-ring shadow-3d">
+                <span className="w-full h-full rounded-full bg-brand-dark flex items-center justify-center">
+                  <ShoppingCart className="w-6 h-6 text-[var(--amount-green)] transition-transform group-hover:rotate-12 group-active:-rotate-12" />
+                </span>
+              </span>
+              <span className="mt-2 text-xs max-w-[5rem] truncate text-black">Shop Store</span>
+            </Link>
+            {categories.filter(c => !isShopCategory(c)).map((c) => {
               const Icon = getCategoryIcon(c.name)
               return (
                 <Link
                   key={c.slug}
                   href={`/dashboard/category/${c.slug}`}
                   prefetch
-                  className="inline-flex flex-col items-center transition-colors hover:brightness-105 select-none"
+                  className="group inline-flex flex-col items-center transition-colors hover:brightness-105 select-none"
                 >
                   <span className="w-14 h-14 rounded-full chip-ring shadow-3d">
                     <span className="w-full h-full rounded-full bg-brand-dark flex items-center justify-center">
-                      <Icon className="w-6 h-6 text-[var(--amount-green)]" />
+                      <Icon className="w-6 h-6 text-[var(--amount-green)] transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                     </span>
                   </span>
                   <span className="mt-2 text-xs max-w-[5rem] truncate text-black">{c.name}</span>
@@ -483,10 +537,10 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
       {/* Recent Expenses scrollable area */}
       <div ref={recentScrollRef} className="flex-1 overflow-y-auto scroll-smooth px-4 pb-6">
         <div className="p-4 bg-white dark:bg-zinc-800 rounded-xl shadow">
-          <div className="relative flex items-center mb-3 gap-2">
-            <h3 className="font-semibold">Recent Expenses</h3>
-            <div className="ml-auto flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-700 rounded-md px-3 py-1 w-full max-w-xs">
+          <div className="mb-3">
+            <h3 className="font-semibold">Recent Expense</h3>
+            <div className="relative mt-2 flex items-center gap-2">
+              <div className="flex flex-1 items-center gap-2 bg-gray-100 dark:bg-zinc-700 rounded-md px-3 py-1 w-full">
                 <Search className="w-4 h-4" />
                 <input
                   type="text"
@@ -499,7 +553,7 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
               <button
                 type="button"
                 onClick={toggleRecentDatePopover}
-                className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200"
+                className="ml-auto inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200"
                 title="Filter by date"
                 aria-label="Filter by date"
               >
@@ -509,18 +563,28 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
                 <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-white dark:bg-zinc-800 rounded-md shadow z-10">
                   <div className="text-sm font-medium mb-2">Date range</div>
                   <div className="space-y-2">
-                    <input
-                      type="date"
-                      value={recentDateDraft.dateFrom}
-                      onChange={(e) => setRecentDateDraft(prev => ({ ...prev, dateFrom: e.target.value }))}
-                      className="w-full bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 text-xs"
-                    />
-                    <input
-                      type="date"
-                      value={recentDateDraft.dateTo}
-                      onChange={(e) => setRecentDateDraft(prev => ({ ...prev, dateTo: e.target.value }))}
-                      className="w-full bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 text-xs"
-                    />
+                    <div className="w-full bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-2">
+                      <div className="flex items-center gap-1 text-[10px] opacity-70 mb-1">
+                        <span>Start date</span>
+                      </div>
+                      <input
+                        type="date"
+                        value={recentDateDraft.dateFrom}
+                        onChange={(e) => setRecentDateDraft(prev => ({ ...prev, dateFrom: e.target.value }))}
+                        className="w-full bg-transparent rounded-md px-2 py-1 text-xs"
+                      />
+                    </div>
+                    <div className="w-full bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-2">
+                      <div className="flex items-center gap-1 text-[10px] opacity-70 mb-1">
+                        <span>End date</span>
+                      </div>
+                      <input
+                        type="date"
+                        value={recentDateDraft.dateTo}
+                        onChange={(e) => setRecentDateDraft(prev => ({ ...prev, dateTo: e.target.value }))}
+                        className="w-full bg-transparent rounded-md px-2 py-1 text-xs"
+                      />
+                    </div>
                     <div className="flex justify-end gap-2 pt-1">
                       <button type="button" onClick={clearRecentDateRange} className="text-xs px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200">Clear</button>
                       <button type="button" onClick={applyRecentDateRange} className="text-xs px-2 py-1 rounded-md bg-black text-white">Apply</button>
@@ -536,10 +600,10 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
               const catName = catItem?.name || 'Category'
               const CatIcon = getCategoryIcon(catName)
               return (
-                <div key={r.id} className="flex items-center justify-between py-2">
+                <div key={r.id} className="group flex items-center justify-between py-2">
                   <div className="flex items-center gap-3">
-                    <span className="h-7 w-7 rounded-full chip-ring shadow-3d grid place-items-center">
-                      <CatIcon className="w-4 h-4 text-white" />
+                    <span className="h-7 w-7 rounded-full bg-gradient-to-br from-black to-[var(--amount-green)] ring-1 ring-[var(--amount-green)]/30 shadow-lg grid place-items-center">
+                      <CatIcon className="w-4 h-4 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                     </span>
                     <div className="leading-tight">
                       <div className="text-sm font-medium">{r.note || 'Expense'}{r.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>

@@ -12,13 +12,15 @@ import LoadingOverlay from '@/app/components/LoadingOverlay'
 import BudgetForm from '@/app/components/budget/BudgetForm'
 import ExpenseForm from '@/app/components/budget/ExpenseForm'
 import MiniSpendChart from '@/app/components/budget/MiniSpendChart'
+import { useDashboardData } from '@/hooks/useDashboardData'
 // Mobile redesign uses custom list rows instead of table summary
-import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil } from 'lucide-react'
+import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, IndianRupee } from 'lucide-react'
 
 const CategoryPage = () => {
   const router = useRouter()
   const params = useParams()
   const { user, loading, signOut } = useAuth()
+  const { addRecentExpense, updateRecentExpense } = useDashboardData()
   const slug = params.slug
   const [category, setCategory] = useState(null) // { id: dbId, name, slug }
   const displayName = (user?.user_metadata?.name || user?.email || '').split('@')[0]
@@ -242,6 +244,8 @@ const CategoryPage = () => {
     } else {
       setExpensesBuying([mapped, ...expensesBuying])
     }
+    // Update global recent cache so dashboard reflects this change without full reload
+    try { addRecentExpense(data) } catch {}
     // Close modal on successful add
     setShowExpenseModal(false)
 
@@ -281,6 +285,8 @@ const CategoryPage = () => {
     } else {
       setExpensesBuying(prev => prev.map(e => e.id === mapped.id ? { ...mapped, edited: true } : e))
     }
+    // Patch global recent cache entry if present
+    try { updateRecentExpense(data) } catch {}
     // Edited flag now comes from API; no local storage tracking
     setEditingExpense(null)
     setShowExpenseModal(false)
@@ -493,19 +499,20 @@ const CategoryPage = () => {
         {/* Single category budget + overspend alert */}
         {!showBudgetForm && (
           <div className="mt-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
                 <span className="text-xs text-brand-soft">Budget for</span>
                 <span className="text-xs text-brand-soft font-medium">{category?.name}</span>
               </div>
-              <div className="flex items-baseline gap-2">
+              <div className="flex items-center justify-between">
                 <span className="font-extrabold text-3xl text-[var(--amount-green)]">₹{Number(budget).toLocaleString()}</span>
                 <button
                   type="button"
                   onClick={openTopupModal}
-                  className="ml-2 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-xs ring-1 ring-white/20"
+                  className="ml-2 inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-xs ring-1 ring-white/20"
                 >
-                  Add to Budget
+                  <IndianRupee className="w-3 h-3" />
+                  <span>Add to Budget</span>
                 </button>
               </div>
             </div>
@@ -564,16 +571,31 @@ const CategoryPage = () => {
           />
         ) : (
           <>
-            {/* Add Expense button between topbar and tabs */}
-            <div className="mb-3">
-              <button
-                onClick={() => { setActiveKind(isHomeBuilding ? activeTab : 'buying'); setShowExpenseModal(true) }}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-dark text-white py-3 ring-1 ring-[var(--brand-primary)]/30"
-                aria-label="Add new expense"
-              >
-                <Plus className="w-5 h-5" />
-                Add New Expense
-              </button>
+            {/* Add Expense buttons between topbar and tabs */}
+            <div className="mt-3 mb-6">
+              {isHomeBuilding ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => { setActiveKind('buying'); setShowExpenseModal(true) }}
+                    className="rounded-xl bg-brand-dark text-white py-3 ring-1 ring-[var(--brand-primary)]/30"
+                    aria-label="Add buying expense"
+                  >Add Buying Expense</button>
+                  <button
+                    type="button"
+                    onClick={() => { setActiveKind('labour'); setShowExpenseModal(true) }}
+                    className="rounded-xl bg-brand-dark text-white py-3 ring-1 ring-[var(--brand-primary)]/30"
+                    aria-label="Add labour expense"
+                  >Add Labour Expense</button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setActiveKind('buying'); setShowExpenseModal(true) }}
+                  className="w-full rounded-xl bg-brand-dark text-white py-3 ring-1 ring-[var(--brand-primary)]/30"
+                  aria-label="Add new expense"
+                >Add New Expense</button>
+              )}
             </div>
 
             <Tabs value={activeTab} onValueChange={(v)=>setActiveTab(v)} className="w-full">
@@ -614,10 +636,10 @@ const CategoryPage = () => {
                   {filteredBuying.slice(0, visibleCounts.buying).map((e) => {
                     const CatIcon = getCategoryIcon(category?.name)
                     return (
-                      <div key={e.id} className="flex items-center justify-between py-2">
+                      <div key={e.id} className="group flex items-center justify-between py-2">
                         <div className="flex items-center gap-3">
                           <span className="h-7 w-7 rounded-full chip-ring grid place-items-center">
-                            <CatIcon className="w-4 h-4 text-white" />
+                            <CatIcon className="w-4 h-4 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                           </span>
                           <div className="leading-tight">
                             <div className="text-sm font-medium">{e.name || 'Expense'}{e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
@@ -684,10 +706,10 @@ const CategoryPage = () => {
                     {filteredLabour.slice(0, visibleCounts.labour).map((e) => {
                     const CatIcon = getCategoryIcon(category?.name)
                     return (
-                      <div key={e.id} className="flex items-center justify-between py-2">
+                      <div key={e.id} className="group flex items-center justify-between py-2">
                         <div className="flex items-center gap-3">
                           <span className="h-7 w-7 rounded-full chip-ring grid place-items-center">
-                            <CatIcon className="w-4 h-4 text-white" />
+                            <CatIcon className="w-4 h-4 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                           </span>
                           <div className="leading-tight">
                             <div className="text-sm font-medium">{e.name || 'Expense'}{e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
@@ -729,29 +751,14 @@ const CategoryPage = () => {
       {/* Modal for Add / Edit Expense */}
       {showExpenseModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
-          <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4">
+          <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4 text-black dark:text-white">
             <div className="flex items-center justify-between mb-3">
-              <h4 className="font-semibold">{editingExpense ? 'Edit Expense' : 'Add New Expense'}</h4>
+              <h4 className="font-semibold">{editingExpense ? 'Edit Expense' : (activeKind === 'labour' ? 'Add Labour Expense' : 'Add New Purchase')}</h4>
               <button onClick={() => { setShowExpenseModal(false); setEditingExpense(null) }} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="flex items-center gap-2 mb-3">
-              <button
-                className={`px-3 py-1 rounded-full text-sm ${activeKind === 'buying' ? 'bg-brand-dark text-white' : 'bg-gray-200 dark:bg-zinc-700'}`}
-                onClick={() => setActiveKind('buying')}
-              >
-                Buying
-              </button>
-              {isHomeBuilding && (
-                <button
-                  className={`px-3 py-1 rounded-full text-sm ${activeKind === 'labour' ? 'bg-brand-dark text-white' : 'bg-gray-200 dark:bg-zinc-700'}`}
-                  onClick={() => setActiveKind('labour')}
-                >
-                  Labour
-                </button>
-              )}
-            </div>
+            {/* Removed kind toggle to show only the selected form type */}
             <ExpenseForm 
               categoryId={category.id} 
               onExpenseAdded={handleExpenseAdded}
@@ -760,6 +767,7 @@ const CategoryPage = () => {
               mode={editingExpense ? 'edit' : 'add'}
               kind={editingExpense ? editingExpense.kind : (isHomeBuilding ? activeKind : 'buying')}
               payeeLabel={activeKind === 'labour' ? 'Labour Name' : 'Where/Who (shop)'}
+              categoryName={category?.name}
             />
           </div>
         </div>
@@ -770,28 +778,28 @@ const CategoryPage = () => {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
           <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4">
             <div className="flex items-center justify-between mb-3">
-              <h4 className="font-semibold">Add to Budget</h4>
+              <h4 className="font-semibold text-black dark:text-white">Add to Budget</h4>
               <button onClick={() => setShowTopupModal(false)} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Amount (₹)</label>
-                <input type="number" min="0" step="0.01" value={topupForm.amount} onChange={(e)=>setTopupForm(prev=>({...prev, amount: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" placeholder="e.g. 10,000" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Date</label>
-                <input type="date" value={topupForm.date} onChange={(e)=>setTopupForm(prev=>({...prev, date: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Reason</label>
-                <input type="text" value={topupForm.reason} onChange={(e)=>setTopupForm(prev=>({...prev, reason: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" placeholder="e.g. Extra funds, bonus, correction" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Type</label>
-                <input type="text" value={topupForm.type} onChange={(e)=>setTopupForm(prev=>({...prev, type: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600" placeholder="e.g. Cash, Bank transfer" />
-              </div>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                <label className="text-sm font-medium text-black dark:text-white">Amount (₹)</label>
+                <input type="number" min="0" step="0.01" value={topupForm.amount} onChange={(e)=>setTopupForm(prev=>({...prev, amount: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 text-black dark:text-white placeholder:text-black/70 dark:placeholder:text-black/70 caret-black" placeholder="e.g. 10,000" />
+                </div>
+                <div className="space-y-1">
+                <label className="text-sm font-medium text-black dark:text-white">Date</label>
+                <input type="date" value={topupForm.date} onChange={(e)=>setTopupForm(prev=>({...prev, date: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 text-black dark:text-white caret-black" />
+                </div>
+                <div className="space-y-1">
+                <label className="text-sm font-medium text-black dark:text-white">Reason</label>
+                <input type="text" value={topupForm.reason} onChange={(e)=>setTopupForm(prev=>({...prev, reason: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 text-black dark:text-white placeholder:text-black/70 dark:placeholder:text-black/70 caret-black" placeholder="e.g. Extra funds, bonus, correction" />
+                </div>
+                <div className="space-y-1">
+                <label className="text-sm font-medium text-black dark:text-white">Type</label>
+                <input type="text" value={topupForm.type} onChange={(e)=>setTopupForm(prev=>({...prev, type: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 text-black dark:text-white placeholder:text-black/70 dark:placeholder:text-black/70 caret-black" placeholder="e.g. Cash, Bank transfer" />
+                </div>
               <button type="button" onClick={handleTopupSubmit} disabled={addingTopup} className="w-full rounded-md bg-brand-dark text-white py-2 ring-1 ring-[var(--brand-primary)]/30 disabled:opacity-60">
                 {addingTopup ? 'Adding...' : 'Add Amount'}
               </button>

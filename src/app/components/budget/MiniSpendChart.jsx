@@ -140,43 +140,43 @@ const MiniSpendChart = ({ buyingExpenses = [], labourExpenses = [] }) => {
       <div className="flex items-center justify-between mb-2 text-[11px] text-white/80">
         <div className="flex items-center gap-2">
           {modes.map(m => (
-            <button
-              key={m.key}
-              type="button"
-              onClick={() => {
-                setMode(m.key)
-                if (m.key === 'month') {
-                  // focus the month input for quick selection
-                  setTimeout(() => monthInputRef.current?.showPicker?.(), 0)
-                }
-              }}
-              className={`px-2 py-1 rounded-md leading-none ${mode === m.key ? 'bg-black text-white' : 'bg-white/10 hover:bg-white/20'}`}
-            >{m.label}</button>
+            m.key === 'month' ? (
+              <div key={m.key} className="inline-flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('month')
+                    setTimeout(() => monthInputRef.current?.showPicker?.(), 0)
+                  }}
+                  className={`px-2 py-1 rounded-md leading-none ${mode === 'month' ? 'bg-black text-white' : 'bg-white/10 hover:bg-white/20'}`}
+                  title="Select month"
+                >{mode === 'month' ? formatMonthShort(monthValue) : m.label}</button>
+                {mode === 'month' && (
+                  <button
+                    type="button"
+                    onClick={() => setMonthValue(currentMonthValue())}
+                    className="px-1 py-1 rounded-sm leading-none bg-white/10 hover:bg-white/20 text-white/80"
+                    aria-label="Clear month"
+                    title="Reset to current month"
+                  >×</button>
+                )}
+              </div>
+            ) : (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setMode(m.key)}
+                className={`px-2 py-1 rounded-md leading-none ${mode === m.key ? 'bg-black text-white' : 'bg-white/10 hover:bg-white/20'}`}
+              >{m.label}</button>
+            )
           ))}
-          {mode === 'month' && (
-            <div className="inline-flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => monthInputRef.current?.showPicker?.()}
-                className="px-2 py-1 rounded-md leading-none bg-white/10 hover:bg-white/20 text-white/80"
-                title="Select month"
-              >{formatMonthShort(monthValue)}</button>
-              <button
-                type="button"
-                onClick={() => setMonthValue(currentMonthValue())}
-                className="px-1 py-1 rounded-sm leading-none bg-white/10 hover:bg-white/20 text-white/80"
-                aria-label="Clear month"
-                title="Reset to current month"
-              >×</button>
-              <input
-                ref={monthInputRef}
-                type="month"
-                value={monthValue}
-                onChange={(e) => setMonthValue(e.target.value)}
-                className="absolute w-0 h-0 opacity-0 pointer-events-none"
-              />
-            </div>
-          )}
+          <input
+            ref={monthInputRef}
+            type="month"
+            value={monthValue}
+            onChange={(e) => setMonthValue(e.target.value)}
+            className="absolute w-0 h-0 opacity-0 pointer-events-none"
+          />
       </div>
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400"></span> Buying</span>

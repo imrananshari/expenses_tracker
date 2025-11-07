@@ -227,6 +227,13 @@
     background-repeat: repeat;
   }
 
+  /* Animation for diagonal pattern (sleek slide) */
+  .animate-pattern { animation: pattern-slide 6s linear infinite; }
+  @keyframes pattern-slide {
+    0% { background-position: 0 0; }
+    100% { background-position: 40px 0; }
+  }
+
   /* hide horizontal scrollbar but allow scroll */
   .no-scrollbar {
     -ms-overflow-style: none; /* IE and Edge */
@@ -258,4 +265,14 @@
 
   /* Utility for consistent amount color */
   .text-amount { color: var(--amount-green); }
+
+  /* Subtle animated shine for container bottoms */
+  .animate-shine {
+    animation: shine-slide 3s linear infinite;
+    transform: translateX(-50%);
+  }
+  @keyframes shine-slide {
+    0% { transform: translateX(-50%); }
+    100% { transform: translateX(0%); }
+  }
 }

@@ -3,6 +3,7 @@ import React,{useEffect, useState} from 'react'
 import { useRouter } from 'next/navigation'
 import {useAuth} from '@/hooks/useAuth'
 import client from '@/api/client'
+import { DashboardDataProvider } from '@/hooks/useDashboardData'
 
 const PrivatePagesLayout=({children})=>{
   const {user,loading}=useAuth()
@@ -29,9 +30,11 @@ const PrivatePagesLayout=({children})=>{
 
   if (!allowRender && (loading || !user)) return null
   return (
-    <div>
-      {children}
-    </div>
+    <DashboardDataProvider>
+      <div>
+        {children}
+      </div>
+    </DashboardDataProvider>
   )
 }
 
