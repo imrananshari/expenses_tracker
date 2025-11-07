@@ -4,7 +4,8 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { getUserCategories, getBudgetForMonth, getBudgetsForMonthBulk, listRecentExpenses, upsertBudget, listExpenses, addExpense, addCategory, updateExpense } from '@/api/db'
-import { IndianRupee, ShoppingCart, Calendar, Plus, Bell, LogOut, Search, Shirt, Store, Car, Wrench, Utensils, UtensilsCrossed } from 'lucide-react'
+import { IndianRupee, ShoppingCart, Calendar, Plus, Bell, LogOut, Search, Shirt, Store, Car, Wrench, Utensils, UtensilsCrossed, FileDown } from 'lucide-react'
+import { exportExpensesPdf } from '@/lib/pdf'
 import MiniSpendChart from '@/app/components/budget/MiniSpendChart'
 import ExpenseForm from '@/app/components/budget/ExpenseForm'
 import BudgetForm from '@/app/components/budget/BudgetForm'
@@ -367,6 +368,37 @@ const ShopPage = () => {
     setDatePopoverOpen(prev => ({ ...prev, [kind]: false }))
   }
 
+  const handleExportPdf = async (kind) => {
+    const data = kind === 'buying' ? filteredBuying : filteredSales
+    const title = `${selectedCategoryName || 'Shop'} • ${kind === 'buying' ? 'Purchase' : 'Sales'} Records`
+    const lowerCat = (selectedCategoryName || '').toLowerCase()
+    let labels
+    if (lowerCat.includes('grocery')) {
+      labels = kind === 'buying'
+        ? { nameLabel: 'Item Name', payeeLabel: 'Shop', amountLabel: 'Amount (₹)', dateLabel: 'Purchase Date' }
+        : { nameLabel: 'Sale Item', payeeLabel: 'Customer', amountLabel: 'Amount (₹)', dateLabel: 'Sale Date' }
+    } else if (lowerCat.includes('garment') || lowerCat.includes('cloth')) {
+      labels = kind === 'buying'
+        ? { nameLabel: 'Garment Name', payeeLabel: 'Supplier', amountLabel: 'Amount (₹)', dateLabel: 'Purchase Date' }
+        : { nameLabel: 'Garment Name', payeeLabel: 'Customer', amountLabel: 'Amount (₹)', dateLabel: 'Sale Date' }
+    } else {
+      labels = kind === 'buying'
+        ? { nameLabel: 'Purchase Name', payeeLabel: 'Where/Who (shop)', amountLabel: 'Amount (₹)', dateLabel: 'Spent Date' }
+        : { nameLabel: 'Sale Name', payeeLabel: 'Customer', amountLabel: 'Amount (₹)', dateLabel: 'Sale Date' }
+    }
+    const totalSpentAll = (expensesBuying || []).reduce((s,e)=>s+Number(e.amount||0),0) + (expensesSales || []).reduce((s,e)=>s+Number(e.amount||0),0)
+    await exportExpensesPdf({
+      title,
+      user: { name: displayName, email: user?.email || '' },
+      logoUrl: '/budgzyx.svg',
+      records: data,
+      kind,
+      labels,
+      budgetAmount: Number(budgetInfo.amount || 0),
+      totalSpent: totalSpentAll,
+    })
+  }
+
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col bg-brand-dark">
       {/* Mobile header to match Home Building */}
@@ -515,6 +547,9 @@ const ShopPage = () => {
                   <button type="button" onClick={() => toggleDatePopover('buying')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200" title="Filter by date" aria-label="Filter by date">
                     <Calendar className="w-4 h-4" />
                   </button>
+                  <button type="button" onClick={() => handleExportPdf('buying')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200" title="Export purchase records as PDF" aria-label="Export PDF">
+                    <FileDown className="w-4 h-4" />
+                  </button>
                   <div className="ml-auto flex items-center gap-2 bg-gray-100 dark:bg-zinc-700 rounded-md px-3 py-1 w-full max-w-xs">
                     <Search className="w-4 h-4 text-black dark:text-white" />
                     <input type="text" value={filters.buying.search} onChange={(e)=>setFilters(prev=>({ ...prev, buying: { search: e.target.value } }))} placeholder="Search" className="bg-transparent text-sm w-full outline-none text-black dark:text-white placeholder:text-gray-500 dark:placeholder:text-white/60" />
@@ -574,6 +609,9 @@ const ShopPage = () => {
                 <div className="relative flex items-center mb-3 gap-2">
                   <button type="button" onClick={() => toggleDatePopover('sale')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200" title="Filter by date" aria-label="Filter by date">
                     <Calendar className="w-4 h-4" />
+                  </button>
+                  <button type="button" onClick={() => handleExportPdf('sale')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200" title="Export sales records as PDF" aria-label="Export PDF">
+                    <FileDown className="w-4 h-4" />
                   </button>
                   <div className="ml-auto flex items-center gap-2 bg-gray-100 dark:bg-zinc-700 rounded-md px-3 py-1 w-full max-w-xs">
                     <Search className="w-4 h-4 text-black dark:text-white" />

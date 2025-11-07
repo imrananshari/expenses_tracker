@@ -14,7 +14,8 @@ import ExpenseForm from '@/app/components/budget/ExpenseForm'
 import MiniSpendChart from '@/app/components/budget/MiniSpendChart'
 import { useDashboardData } from '@/hooks/useDashboardData'
 // Mobile redesign uses custom list rows instead of table summary
-import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, IndianRupee } from 'lucide-react'
+import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, IndianRupee, FileDown } from 'lucide-react'
+import { exportExpensesPdf } from '@/lib/pdf'
 
 const CategoryPage = () => {
   const router = useRouter()
@@ -386,6 +387,25 @@ const CategoryPage = () => {
     setDatePopoverOpen(prev => ({ ...prev, [kind]: false }))
   }
 
+  const handleExportPdf = async (kind) => {
+    const data = kind === 'buying' ? filteredBuying : filteredLabour
+    const title = `${category?.name || 'Category'} • ${kind === 'buying' ? 'Buying' : 'Labour'} Expenses`
+    const labels = kind === 'buying'
+      ? { nameLabel: 'Expense Name', payeeLabel: 'Where/Who (shop)', amountLabel: 'Amount (₹)', dateLabel: 'Spent Date' }
+      : { nameLabel: 'Labour Name', payeeLabel: 'Worker', amountLabel: 'Amount (₹)', dateLabel: 'Spent Date' }
+    const totalSpentAll = (expensesBuying || []).reduce((s,e)=>s+Number(e.amount||0),0) + (expensesLabour || []).reduce((s,e)=>s+Number(e.amount||0),0)
+    await exportExpensesPdf({
+      title,
+      user: { name: displayName, email: user?.email || '' },
+      logoUrl: '/budgzyx.svg',
+      records: data,
+      kind,
+      labels,
+      budgetAmount: Number(budget || 0),
+      totalSpent: totalSpentAll,
+    })
+  }
+
   const handleBackToDashboard = () => {
     router.push('/dashboard')
   }
@@ -618,6 +638,9 @@ const CategoryPage = () => {
                   <button type="button" onClick={() => toggleDatePopover('buying')} className="ml-auto inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200">
                     <Calendar className="w-4 h-4" />
                   </button>
+                  <button type="button" onClick={() => handleExportPdf('buying')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200" title="Export buying expenses as PDF" aria-label="Export PDF">
+                    <FileDown className="w-4 h-4" />
+                  </button>
                   {datePopoverOpen.buying && (
                     <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-white dark:bg-zinc-800 rounded-md shadow z-10">
                       <div className="text-sm font-medium mb-2">Date range</div>
@@ -687,6 +710,9 @@ const CategoryPage = () => {
                   </div>
                   <button type="button" onClick={() => toggleDatePopover('labour')} className="ml-auto inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200">
                     <Calendar className="w-4 h-4" />
+                  </button>
+                  <button type="button" onClick={() => handleExportPdf('labour')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200" title="Export labour expenses as PDF" aria-label="Export PDF">
+                    <FileDown className="w-4 h-4" />
                   </button>
                   {datePopoverOpen.labour && (
                     <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-white dark:bg-zinc-800 rounded-md shadow z-10">
