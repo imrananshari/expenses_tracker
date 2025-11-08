@@ -130,7 +130,7 @@ const NotificationsPage = () => {
         </div>
         {/* Footer actions sticky at bottom */}
         <div className="mt-4 border-t border-white/10 pt-3 sticky bottom-0 bg-brand-dark/30 backdrop-blur-sm">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-around gap-2 flex-nowrap">
             <button
               className={`text-xs px-2 py-1 rounded-md ${activeFilter==='all' ? 'bg-white/20' : 'bg-white/10 hover:bg-white/20'}`}
               onClick={()=>setActiveFilter('all')}
@@ -147,10 +147,7 @@ const NotificationsPage = () => {
               className={`text-xs px-2 py-1 rounded-md ${activeFilter==='topup' ? 'bg-white/20' : 'bg-white/10 hover:bg-white/20'}`}
               onClick={()=>setActiveFilter('topup')}
             >Top-ups</button>
-            <div className="ml-auto flex items-center gap-2">
-              <button className="text-xs px-2 py-1 rounded-md bg-white/10 hover:bg-white/20" onClick={()=>{ setNotifications([]); toast.success('Cleared notifications') }}>Clear</button>
-              <button className="text-xs px-2 py-1 rounded-md bg-white/10 hover:bg-white/20" onClick={shuffleNotifications}>Shuffle ✨</button>
-            </div>
+            <button className="text-xs px-2 py-1 rounded-md bg-white/10 hover:bg-white/20" onClick={()=>{ setNotifications([]); toast.success('Cleared notifications') }}>Clear</button>
           </div>
         </div>
       </div>

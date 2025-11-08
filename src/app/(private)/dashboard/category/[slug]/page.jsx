@@ -21,7 +21,7 @@ const CategoryPage = () => {
   const router = useRouter()
   const params = useParams()
   const { user, loading, signOut } = useAuth()
-  const { addRecentExpense, updateRecentExpense } = useDashboardData()
+  const { addRecentExpense, updateRecentExpense, getCategoryData, setCategoryData } = useDashboardData()
   const slug = params.slug
   const [category, setCategory] = useState(null) // { id: dbId, name, slug }
   const displayName = (user?.user_metadata?.name || user?.email || '').split('@')[0]
@@ -83,26 +83,36 @@ const CategoryPage = () => {
 
   useEffect(() => {
     const loadData = async () => {
-      overlayStartRef.current = Date.now()
-      setOverlayVisible(true)
-      setBudgetLoading(true)
       try {
         if (!user) return
-        // Load category by slug
+        // 1) Show cached immediately if available
+        const cached = getCategoryData(slug)
+        if (cached) {
+          setCategory(cached.category || null)
+          setBudget(cached.budget || 0)
+          setBudgetId(cached.budgetId || null)
+          setShowBudgetForm(Boolean(cached.showBudgetForm))
+          setExpensesBuying(cached.expensesBuying || [])
+          setExpensesLabour(cached.expensesLabour || [])
+          setTopups(cached.topups || [])
+          setOverlayVisible(false)
+          setBudgetLoading(false)
+        } else {
+          overlayStartRef.current = Date.now()
+          setOverlayVisible(true)
+          setBudgetLoading(true)
+        }
+
+        // 2) Refresh in background to get latest
         const { data: cat, error: catErr } = await getCategoryBySlug(user.id, slug)
-        if (catErr) {
-          console.error(catErr)
-          toast.error('Category not found')
+        if (catErr || !cat) {
+          if (!cached) toast.error('Category not found')
           setBudgetLoading(false)
           return
         }
         setCategory(cat)
 
-        // Load budget for current month
-        const { data: budgetRow, error: budgetErr } = await getBudgetForMonth(user.id, cat.id)
-        if (budgetErr) {
-          console.error(budgetErr)
-        }
+        const { data: budgetRow } = await getBudgetForMonth(user.id, cat.id)
         if (budgetRow) {
           setBudget(budgetRow.amount)
           setBudgetId(budgetRow.id)
@@ -113,19 +123,15 @@ const CategoryPage = () => {
           setShowBudgetForm(true)
         }
 
-        // Load expenses by kind for this category
         const [
-          { data: buyRows, error: buyErr },
-          { data: labRows, error: labErr },
-          { data: topupRows, error: topupErr }
+          { data: buyRows },
+          { data: labRows },
+          { data: topupRows }
         ] = await Promise.all([
           listExpenses(user.id, cat.id, 'buying'),
           listExpenses(user.id, cat.id, 'labour'),
           listExpenses(user.id, cat.id, 'topup')
         ])
-        if (buyErr) console.error(buyErr)
-        if (labErr) console.error(labErr)
-        if (topupErr) console.error(topupErr)
         const buyMapped = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited) }))
         const labMapped = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited) }))
         const topMapped = (topupRows || []).map(e => ({ id: e.id, reason: e.note || 'Added amount', type: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'topup' }))
@@ -136,13 +142,13 @@ const CategoryPage = () => {
         // Build notifications for this category
         const newNotifications = []
         const totalSpentNow = (buyMapped || []).reduce((s,e)=>s+Number(e.amount||0),0) + (labMapped || []).reduce((s,e)=>s+Number(e.amount||0),0)
-        const overspentNow = Math.max(0, totalSpentNow - Number(budget || 0))
+        const overspentNow = Math.max(0, totalSpentNow - Number(budgetRow?.amount || 0))
         if (overspentNow > 0) {
           newNotifications.push({
             id: `overspend-${cat.slug}`,
             type: 'overspend',
             title: `Overspent in ${cat.name}`,
-            message: `Exceeded by ₹${overspentNow.toLocaleString()}. Spent ₹${totalSpentNow.toLocaleString()} of ₹${Number(budget||0).toLocaleString()}.`,
+            message: `Exceeded by ₹${overspentNow.toLocaleString()}. Spent ₹${totalSpentNow.toLocaleString()} of ₹${Number(budgetRow?.amount||0).toLocaleString()}.`,
             categorySlug: cat.slug,
             severity: 'danger',
             date: new Date().toISOString(),
@@ -180,6 +186,17 @@ const CategoryPage = () => {
           })
         })
         setNotifications(newNotifications)
+
+        // 3) Save to shared cache so revisits are instant
+        setCategoryData(slug, {
+          category: cat,
+          budget: budgetRow?.amount || 0,
+          budgetId: budgetRow?.id || null,
+          showBudgetForm: !budgetRow,
+          expensesBuying: buyMapped,
+          expensesLabour: labMapped,
+          topups: topMapped,
+        })
       } finally {
         setBudgetLoading(false)
       }
@@ -229,6 +246,8 @@ const CategoryPage = () => {
     setBudget(data.amount)
     setBudgetId(data.id)
     setShowBudgetForm(false)
+    // update cache
+    setCategoryData(slug, { budget: data.amount, budgetId: data.id, showBudgetForm: false })
   }
 
   const handleExpenseAdded = async (expense) => {
@@ -242,8 +261,10 @@ const CategoryPage = () => {
     const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited) }
     if (mapped.kind === 'labour') {
       setExpensesLabour([mapped, ...expensesLabour])
+      setCategoryData(slug, { expensesLabour: [mapped, ...(expensesLabour || [])] })
     } else {
       setExpensesBuying([mapped, ...expensesBuying])
+      setCategoryData(slug, { expensesBuying: [mapped, ...(expensesBuying || [])] })
     }
     // Update global recent cache so dashboard reflects this change without full reload
     try { addRecentExpense(data) } catch {}
@@ -283,8 +304,10 @@ const CategoryPage = () => {
     const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited) }
     if (mapped.kind === 'labour') {
       setExpensesLabour(prev => prev.map(e => e.id === mapped.id ? { ...mapped, edited: true } : e))
+      setCategoryData(slug, { expensesLabour: (expensesLabour || []).map(e => e.id === mapped.id ? { ...mapped, edited: true } : e) })
     } else {
       setExpensesBuying(prev => prev.map(e => e.id === mapped.id ? { ...mapped, edited: true } : e))
+      setCategoryData(slug, { expensesBuying: (expensesBuying || []).map(e => e.id === mapped.id ? { ...mapped, edited: true } : e) })
     }
     // Patch global recent cache entry if present
     try { updateRecentExpense(data) } catch {}
@@ -339,6 +362,7 @@ const CategoryPage = () => {
       } else {
         const mapped = { id: tData.id, reason: tData.note || 'Added amount', type: tData.payee || null, amount: tData.amount, date: tData.spent_at, kind: 'topup' }
         setTopups([mapped, ...topups])
+        setCategoryData(slug, { topups: [mapped, ...(topups || [])] })
         setNotifications(prev => ([
           ...prev,
           { id: `topup-${tData.id}`, type: 'topup', title: 'Budget increased', message: `Added ₹${Number(tData.amount).toLocaleString()} • ${tData.note || 'Top-up'}`, categorySlug: category.slug, severity: 'info', date: tData.spent_at || new Date().toISOString() }
@@ -619,23 +643,27 @@ const CategoryPage = () => {
             </div>
 
             <Tabs value={activeTab} onValueChange={(v)=>setActiveTab(v)} className="w-full">
-              <TabsList className={`grid w-full ${isHomeBuilding ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                <TabsTrigger value="buying">Buying Expenses</TabsTrigger>
-                {isHomeBuilding && (<TabsTrigger value="labour">Labour Expenses</TabsTrigger>)}
-              </TabsList>
+              {isHomeBuilding && (
+                <TabsList className={`grid w-full grid-cols-2`}>
+                  <TabsTrigger value="buying">Buying Expenses</TabsTrigger>
+                  <TabsTrigger value="labour">Labour Expenses</TabsTrigger>
+                </TabsList>
+              )}
 
               {/* Buying list styled like Recent Expenses */}
               <TabsContent value="buying" className="mt-4 space-y-4">
               <div className="p-4 bg-white dark:bg-zinc-800 rounded-xl shadow">
-                <div className="relative flex items-center mb-3 gap-2">
+                {/* Title on its own line at top-left */}
+                <div className="mb-2">
                   <h3 className="font-semibold">Buying Expenses</h3>
-                  <div className="flex-1 flex justify-center">
-                    <div className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-700 rounded-md px-3 py-1 w-full max-w-xs">
-                      <Search className="w-4 h-4" />
-                      <input type="text" value={filters.buying.search} onChange={(e)=>updateFilter('buying','search', e.target.value)} placeholder="Search" className="bg-transparent text-sm w-full outline-none" />
-                    </div>
+                </div>
+                {/* Controls in one row: search, date filter, PDF */}
+                <div className="relative flex items-center mb-3 gap-2">
+                  <div className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-700 rounded-md px-3 py-1 w-full max-w-xs">
+                    <Search className="w-4 h-4" />
+                    <input type="text" value={filters.buying.search} onChange={(e)=>updateFilter('buying','search', e.target.value)} placeholder="Search" className="bg-transparent text-sm w-full outline-none" />
                   </div>
-                  <button type="button" onClick={() => toggleDatePopover('buying')} className="ml-auto inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200">
+                  <button type="button" onClick={() => toggleDatePopover('buying')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200">
                     <Calendar className="w-4 h-4" />
                   </button>
                   <button type="button" onClick={() => handleExportPdf('buying')} className="inline-flex items-center justify-center bg-gray-100 dark:bg-zinc-700 rounded-md px-2 py-1 hover:bg-gray-200" title="Export buying expenses as PDF" aria-label="Export PDF">
@@ -690,7 +718,7 @@ const CategoryPage = () => {
                     <div className="text-sm text-gray-500">No buying expenses</div>
                   )}
                   {filteredBuying.length > visibleCounts.buying && (
-                    <div ref={buyingSentinelRef} data-id="buying" className="h-8 grid place-items-center text-xs text-gray-500">Loading more…</div>
+                    <div ref={buyingSentinelRef} data-id="buying" aria-hidden="true" className="h-2 opacity-0" />
                   )}
                 </div>
               </div>
@@ -763,7 +791,7 @@ const CategoryPage = () => {
                     <div className="text-sm text-gray-500">No labour expenses</div>
                   )}
                   {filteredLabour.length > visibleCounts.labour && (
-                    <div ref={labourSentinelRef} data-id="labour" className="h-8 grid place-items-center text-xs text-gray-500">Loading more…</div>
+                    <div ref={labourSentinelRef} data-id="labour" aria-hidden="true" className="h-2 opacity-0" />
                   )}
                 </div>
               </div>

@@ -2,6 +2,7 @@
 import React, { useState } from 'react'
 import { ShoppingCart, Hammer } from 'lucide-react'
 import { toast } from 'sonner'
+import { sanitizeTextStrict, sanitizeAmount } from '@/lib/sanitize'
 
 const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpense, mode = 'add', kind = 'buying', payeeLabel = 'Where/Who (shop or receiver)', categoryName = '' }) => {
   const [expenseName, setExpenseName] = useState(initialExpense?.name || '')
@@ -77,11 +78,33 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
     e.preventDefault()
     setLoading(true)
     const when = expenseDate ? new Date(expenseDate) : new Date()
+
+    // Sanitize text inputs
+    const nameSan = sanitizeTextStrict(expenseName, { maxLen: 120 })
+    if (!nameSan.valid) {
+      toast.error('Invalid item name: ' + nameSan.reason)
+      setLoading(false)
+      return
+    }
+    const payeeSan = payee ? sanitizeTextStrict(payee, { maxLen: 120 }) : { valid: true, clean: undefined }
+    if (payee && !payeeSan.valid) {
+      toast.error('Invalid payee: ' + payeeSan.reason)
+      setLoading(false)
+      return
+    }
+
+    // Validate amount
+    const amt = sanitizeAmount(expenseAmount)
+    if (isNaN(amt)) {
+      toast.error('Invalid amount')
+      setLoading(false)
+      return
+    }
     const payload = {
       id: initialExpense?.id,
-      name: expenseName,
-      payee: payee || undefined,
-      amount: parseFloat(expenseAmount),
+      name: nameSan.clean,
+      payee: payeeSan.clean,
+      amount: amt,
       date: when.toISOString(),
       kind
     }

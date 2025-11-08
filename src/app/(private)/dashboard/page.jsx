@@ -123,10 +123,12 @@ import { useDashboardData } from '@/hooks/useDashboardData'
       try {
         // Prefer profile-provided URL; else try public URLs by extension
         if (profile?.avatar_url) {
-          setAvatarOverride(addBuster(profile.avatar_url))
+          // Use stable URL to allow browser caching across navigations
+          setAvatarOverride(profile.avatar_url)
           return
         }
-        const firstUrl = addBuster(getPublicAvatarUrl(effectiveUser.email, avatarExts[0]))
+        // Use stable public URL without cache-busting so it doesn't re-fetch on revisit
+        const firstUrl = getPublicAvatarUrl(effectiveUser.email, avatarExts[0])
         setAvatarTryIndex(0)
         setAvatarOverride(firstUrl || '')
       } catch {
@@ -355,7 +357,8 @@ import { useDashboardData } from '@/hooks/useDashboardData'
                   const next = avatarTryIndex + 1
                   if (next < avatarExts.length && effectiveUser?.email) {
                     setAvatarTryIndex(next)
-                    setAvatarOverride(addBuster(getPublicAvatarUrl(effectiveUser.email, avatarExts[next])) || '')
+                    // Try next stable public URL without cache-busting
+                    setAvatarOverride(getPublicAvatarUrl(effectiveUser.email, avatarExts[next]) || '')
                   } else {
                     setAvatarOverride('')
                   }
@@ -462,7 +465,7 @@ import { useDashboardData } from '@/hooks/useDashboardData'
               className="group inline-flex flex-col items-center transition-colors hover:brightness-105 select-none"
               title="Shop Store"
             >
-              <span className="w-14 h-14 rounded-full chip-ring shadow-3d">
+              <span className="w-14 h-14 rounded-full chip-ring">
                 <span className="w-full h-full rounded-full bg-brand-dark flex items-center justify-center">
                   <ShoppingCart className="w-6 h-6 text-[var(--amount-green)] transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                 </span>
@@ -620,9 +623,9 @@ import { useDashboardData } from '@/hooks/useDashboardData'
             {filteredRecent.length === 0 && (
               <div className="text-sm text-gray-500">No recent expenses</div>
             )}
-            {/* Sentinel for infinite loading */}
+            {/* Invisible sentinel for infinite loading (kept for IntersectionObserver) */}
             {filteredRecent.length > recentVisibleCount && (
-              <div ref={recentSentinelRef} className="h-8 grid place-items-center text-xs text-gray-500">Loading more…</div>
+              <div ref={recentSentinelRef} aria-hidden="true" className="h-2 opacity-0" />
             )}
           </div>
         </div>

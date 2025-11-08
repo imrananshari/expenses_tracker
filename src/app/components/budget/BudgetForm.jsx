@@ -1,6 +1,7 @@
 "use client"
 import React, { useState } from 'react'
 import { toast } from 'sonner'
+import { sanitizeAmount } from '@/lib/sanitize'
 
 const BudgetForm = ({ categoryId, categoryName, onBudgetSet }) => {
   const [budgetAmount, setBudgetAmount] = useState('')
@@ -13,7 +14,12 @@ const BudgetForm = ({ categoryId, categoryName, onBudgetSet }) => {
     // Simulate API call to save budget
     setTimeout(() => {
       // In a real app, you would save this to a database
-      const amount = parseFloat(budgetAmount)
+      const amount = sanitizeAmount(budgetAmount)
+      if (isNaN(amount)) {
+        toast.error('Invalid budget amount')
+        setLoading(false)
+        return
+      }
       onBudgetSet(amount)
       toast.success(`Budget of ₹${amount.toLocaleString()} set for ${categoryName}`)
       setLoading(false)

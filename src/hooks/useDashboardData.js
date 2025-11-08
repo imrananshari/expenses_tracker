@@ -9,6 +9,8 @@ export const DashboardDataProvider = ({ children }) => {
   const [recent, setRecent] = useState(null) // raw rows from API
   const [notifications, setNotifications] = useState(null)
   const [lastUpdatedTs, setLastUpdatedTs] = useState(0)
+  // Cache for individual category pages to avoid full reloads on revisit
+  const [categoryCache, setCategoryCache] = useState({}) // { [slug]: { category, budget, budgetId, expensesBuying, expensesLabour, topups, showBudgetForm, cachedAt } }
 
   const loaded = useMemo(() => {
     return Boolean(categories && categoryBudgets && recent && notifications)
@@ -40,12 +42,35 @@ export const DashboardDataProvider = ({ children }) => {
     setLastUpdatedTs(Date.now())
   }
 
+  // Category cache helpers
+  const getCategoryData = (slug) => {
+    if (!slug) return null
+    return categoryCache[slug] || null
+  }
+  const setCategoryData = (slug, data) => {
+    if (!slug || !data) return
+    setCategoryCache(prev => ({
+      ...prev,
+      [slug]: { ...(prev[slug] || {}), ...data, cachedAt: Date.now() }
+    }))
+    setLastUpdatedTs(Date.now())
+  }
+  const clearCategoryData = (slug) => {
+    if (!slug) return
+    setCategoryCache(prev => {
+      const { [slug]: _, ...rest } = prev
+      return rest
+    })
+  }
+
   const value = {
     // data
-    categories, categoryBudgets, recent, notifications, loaded, lastUpdatedTs,
+    categories, categoryBudgets, recent, notifications, loaded, lastUpdatedTs, categoryCache,
     // setters
     setCategories, setCategoryBudgets, setRecent, setNotifications,
     initialize, addRecentExpense, updateRecentExpense,
+    // category cache API
+    getCategoryData, setCategoryData, clearCategoryData,
   }
 
   return (
