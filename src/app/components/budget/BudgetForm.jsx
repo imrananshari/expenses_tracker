@@ -3,14 +3,20 @@ import React, { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { sanitizeAmount } from '@/lib/sanitize'
 
-const BudgetForm = ({ categoryId, categoryName, onBudgetSet }) => {
-  const [budgetAmount, setBudgetAmount] = useState('')
+const BudgetForm = ({ categoryId, categoryName, onBudgetSet, initialAmount, initialAllocations }) => {
+  const [budgetAmount, setBudgetAmount] = useState(
+    typeof initialAmount === 'number' ? String(initialAmount) : (initialAmount ?? '')
+  )
   const [loading, setLoading] = useState(false)
-  const [allocations, setAllocations] = useState([
-    { bank: 'HDFC', amount: '' },
-    { bank: 'SBI', amount: '' },
-    { bank: 'ICICI', amount: '' },
-  ])
+  const [allocations, setAllocations] = useState(() => {
+    const pre = Array.isArray(initialAllocations) ? initialAllocations.map(a => ({ bank: String(a.bank || ''), amount: String(a.amount ?? '') })) : []
+    if (pre.length > 0) return pre
+    return [
+      { bank: 'HDFC', amount: '' },
+      { bank: 'SBI', amount: '' },
+      { bank: 'ICICI', amount: '' },
+    ]
+  })
 
   const totalAllocated = useMemo(() => {
     return allocations.reduce((sum, a) => {
@@ -57,7 +63,7 @@ const BudgetForm = ({ categoryId, categoryName, onBudgetSet }) => {
 
   return (
     <div className="p-6 bg-white dark:bg-zinc-800 rounded-lg shadow">
-      <h2 className="text-xl font-semibold mb-4">Set Budget for {categoryName}</h2>
+      <h2 className="text-xl font-semibold mb-4">{(initialAmount || (initialAllocations || []).length) ? 'Edit Budget for ' : 'Set Budget for '}{categoryName}</h2>
       
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
@@ -131,7 +137,7 @@ const BudgetForm = ({ categoryId, categoryName, onBudgetSet }) => {
           className="w-full btn-primary"
           disabled={loading}
         >
-          {loading ? 'Setting Budget...' : 'Set Budget'}
+          {loading ? (initialAmount ? 'Updating Budget...' : 'Setting Budget...') : (initialAmount ? 'Update Budget' : 'Set Budget')}
         </button>
       </form>
     </div>

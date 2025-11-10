@@ -675,7 +675,18 @@ const CategoryPage = () => {
               </div>
               {bankAllocations.length > 0 && (
                 <div className="mt-2">
-                  <div className="text-xs text-white/80 mb-1">Payment Sources</div>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-xs text-white/80">Payment Sources</div>
+                    <button
+                      type="button"
+                      onClick={() => setShowBudgetForm(true)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-[11px] ring-1 ring-white/20"
+                      aria-label="Edit payment sources"
+                    >
+                      <Pencil className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     {bankAllocations.map((a, idx) => {
                       const used = bankSpentMap.get(String(a.bank)) || 0
@@ -763,6 +774,8 @@ const CategoryPage = () => {
             categoryId={category.id} 
             categoryName={category.name} 
             onBudgetSet={handleBudgetSet} 
+            initialAmount={budget}
+            initialAllocations={bankAllocations}
           />
         ) : (
           <>
