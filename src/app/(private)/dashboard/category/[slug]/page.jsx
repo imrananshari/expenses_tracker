@@ -106,15 +106,22 @@ const CategoryPage = () => {
     all.forEach(e => {
       const d = e?.date ? new Date(e.date) : null
       if (!d || d < monthStart || d >= monthEnd) return
-      const tag = parseBankTag(e.name)
-      if (!tag) return
-      map.set(tag, (map.get(tag) || 0) + Number(e.amount || 0))
+      const splits = parseTopupSplits(e.name)
+      if (splits.length > 0) {
+        splits.forEach(s => {
+          map.set(s.bank, (map.get(s.bank) || 0) + Number(s.amount || 0))
+        })
+      } else {
+        const tag = parseBankTag(e.name)
+        if (!tag) return
+        map.set(tag, (map.get(tag) || 0) + Number(e.amount || 0))
+      }
     })
     return map
   }, [expensesBuying, expensesLabour, monthStart.getTime(), monthEnd.getTime()])
 
-  // Parse split banks from a top-up note format: "... [Split: HDFC=2000;SBI=1500;ICICI=1000;Custom=500]"
-  const parseTopupSplits = (note) => {
+  // Parse split banks from a note format: "... [Split: HDFC=2000;SBI=1500;ICICI=1000;Custom=500]"
+  function parseTopupSplits(note) {
     const s = String(note || '')
     const m = s.match(/\[Split:\s*([^\]]+)\]/i)
     if (!m) return []
@@ -315,8 +322,13 @@ const CategoryPage = () => {
 
   const handleExpenseAdded = async (expense) => {
     if (!category || !user) return
-    const bankTag = (expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
-    const noteWithBank = `${expense.name}${bankTag}`
+    // Build note with either a single bank tag or a split tag
+    const hasSplits = Array.isArray(expense.bankSplits) && expense.bankSplits.length > 0
+    const splitTag = hasSplits
+      ? ` [Split: ${expense.bankSplits.map(s => `${String(s.bank).trim()}=${Number(s.amount||0)}`).join(';')}]`
+      : ''
+    const bankTag = (!hasSplits && expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
+    const noteWithBank = `${expense.name}${splitTag || bankTag}`
     const { data, error } = await addExpense(user.id, { categoryId: category.id, budgetId, amount: expense.amount, note: noteWithBank, payee: expense.payee, kind: expense.kind, spentAt: expense.date })
     if (error) {
       console.error(error)
@@ -352,8 +364,12 @@ const CategoryPage = () => {
 
   const handleExpenseEdited = async (expense) => {
     if (!category || !user || !editingExpense) return
-    const bankTag = (expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
-    const noteWithBank = `${expense.name}${bankTag}`
+    const hasSplits = Array.isArray(expense.bankSplits) && expense.bankSplits.length > 0
+    const splitTag = hasSplits
+      ? ` [Split: ${expense.bankSplits.map(s => `${String(s.bank).trim()}=${Number(s.amount||0)}`).join(';')}]`
+      : ''
+    const bankTag = (!hasSplits && expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
+    const noteWithBank = `${expense.name}${splitTag || bankTag}`
     const payload = {
       id: editingExpense.id,
       amount: expense.amount,
@@ -852,7 +868,11 @@ const CategoryPage = () => {
                     const CatIcon = getCategoryIcon(category?.name)
                     const bankMatch = String(e.name || '').match(/\[Bank:\s*([^\]]+)\]/i)
                     const bankName = bankMatch ? bankMatch[1].trim() : ''
-                    const displayName = String(e.name || 'Expense').replace(/\s*\[Bank:[^\]]+\]\s*/i,'').trim()
+                    const splits = parseTopupSplits(e.name)
+                    const displayName = String(e.name || 'Expense')
+                      .replace(/\s*\[Bank:[^\]]+\]\s*/i,'')
+                      .replace(/\s*\[Split:[^\]]+\]\s*/i,'')
+                      .trim()
                     const bankIcon = bankIconSrc(bankName)
                     return (
                       <div key={e.id} className="group flex items-center justify-between py-2">
@@ -863,7 +883,20 @@ const CategoryPage = () => {
                           <div className="leading-tight">
                             <div className="text-sm font-medium flex items-center gap-1">
                               <span>{displayName || 'Expense'}</span>
-        {bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
+        {splits.length > 0 ? (
+          <span className="ml-1 flex flex-wrap items-center gap-1">
+            {splits.map((s, idx) => (
+              <span key={`b-split-${e.id}-${idx}`} className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-md bg-white/10 text-white text-[10px] ring-1 ring-white/20">
+                {bankIconSrc(s.bank) ? (
+                  <img src={bankIconSrc(s.bank)} alt={s.bank} className="h-4 w-auto" style={{ objectFit: 'contain', maxWidth: '18px' }} />
+                ) : (
+                  <span className="font-medium">{s.bank}</span>
+                )}
+                <span className="opacity-70">₹{Number(s.amount).toLocaleString()}</span>
+              </span>
+            ))}
+          </span>
+        ) : (bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null)}
                               {e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}
                             </div>
                             <div className="text-[11px] text-black">{category?.name}{e.payee ? ` • ${e.payee}` : ''}</div>
@@ -933,7 +966,11 @@ const CategoryPage = () => {
                     const CatIcon = getCategoryIcon(category?.name)
                     const bankMatch = String(e.name || '').match(/\[Bank:\s*([^\]]+)\]/i)
                     const bankName = bankMatch ? bankMatch[1].trim() : ''
-                    const displayName = String(e.name || 'Expense').replace(/\s*\[Bank:[^\]]+\]\s*/i,'').trim()
+                    const splits = parseTopupSplits(e.name)
+                    const displayName = String(e.name || 'Expense')
+                      .replace(/\s*\[Bank:[^\]]+\]\s*/i,'')
+                      .replace(/\s*\[Split:[^\]]+\]\s*/i,'')
+                      .trim()
                     const bankIcon = bankIconSrc(bankName)
                     return (
                       <div key={e.id} className="group flex items-center justify-between py-2">
@@ -944,7 +981,20 @@ const CategoryPage = () => {
                           <div className="leading-tight">
                             <div className="text-sm font-medium flex items-center gap-1">
                               <span>{displayName || 'Expense'}</span>
-        {bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
+        {splits.length > 0 ? (
+          <span className="ml-1 flex flex-wrap items-center gap-1">
+            {splits.map((s, idx) => (
+              <span key={`l-split-${e.id}-${idx}`} className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-md bg-white/10 text-white text-[10px] ring-1 ring-white/20">
+                {bankIconSrc(s.bank) ? (
+                  <img src={bankIconSrc(s.bank)} alt={s.bank} className="h-4 w-auto" style={{ objectFit: 'contain', maxWidth: '18px' }} />
+                ) : (
+                  <span className="font-medium">{s.bank}</span>
+                )}
+                <span className="opacity-70">₹{Number(s.amount).toLocaleString()}</span>
+              </span>
+            ))}
+          </span>
+        ) : (bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null)}
                               {e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}
                             </div>
                             <div className="text-[11px] text-black">{category?.name}{e.payee ? ` • ${e.payee}` : ''}</div>
@@ -985,7 +1035,7 @@ const CategoryPage = () => {
       {/* Modal for Add / Edit Expense */}
       {showExpenseModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
-          <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4 text-black dark:text-white">
+          <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4 text-black dark:text-white max-h-[85vh] overflow-y-auto thin-scrollbar">
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-semibold">{editingExpense ? 'Edit Expense' : (activeKind === 'labour' ? 'Add Labour Expense' : 'Add New Purchase')}</h4>
               <button onClick={() => { setShowExpenseModal(false); setEditingExpense(null) }} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">
@@ -1002,6 +1052,7 @@ const CategoryPage = () => {
               kind={editingExpense ? editingExpense.kind : (isHomeBuilding ? activeKind : 'buying')}
               payeeLabel={activeKind === 'labour' ? 'Labour Name' : 'Where/Who (shop)'}
               categoryName={category?.name}
+              allocatedBanks={(bankAllocations || []).map(a => String(a.bank))}
             />
           </div>
         </div>
@@ -1010,7 +1061,7 @@ const CategoryPage = () => {
       {/* Add to Budget Modal */}
       {showTopupModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
-          <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4">
+          <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4 max-h-[85vh] overflow-y-auto thin-scrollbar">
             <div className="flex items-center justify-between mb-3">
               <h4 className="font-semibold text-black dark:text-white">Add to Budget</h4>
               <button onClick={() => setShowTopupModal(false)} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">

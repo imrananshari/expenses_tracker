@@ -4,7 +4,7 @@ import { ShoppingCart, Hammer } from 'lucide-react'
 import { toast } from 'sonner'
 import { sanitizeTextStrict, sanitizeAmount } from '@/lib/sanitize'
 
-const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpense, mode = 'add', kind = 'buying', payeeLabel = 'Where/Who (shop or receiver)', categoryName = '' }) => {
+const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpense, mode = 'add', kind = 'buying', payeeLabel = 'Where/Who (shop or receiver)', categoryName = '', allocatedBanks = [] }) => {
   // Extract existing bank tag from the initial name, e.g. "[Bank: HDFC]"
   const bankTagMatch = (initialExpense?.name || '').match(/\[Bank:\s*([^\]]+)\]/)
   const initialBankName = bankTagMatch ? bankTagMatch[1].trim() : ''
@@ -30,6 +30,20 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
   const prefillCustom = initialBankName && !['HDFC','SBI','ICICI','Central','BOI','BOB'].includes(initialBankName) ? initialBankName : ''
   const [bankChoice, setBankChoice] = useState(prefillChoice) // '', 'HDFC', 'SBI', 'ICICI', 'Other'
   const [customBank, setCustomBank] = useState(prefillCustom)
+
+  // Optional multi-bank split for this expense
+  const parseSplitsFromName = (note) => {
+    const s = String(note || '')
+    const m = s.match(/\[Split:\s*([^\]]+)\]/i)
+    if (!m) return []
+    const body = m[1]
+    return body.split(';').map(tok => tok.trim()).filter(Boolean).map(tok => {
+      const [bank, amtStr] = tok.split('=')
+      const amt = Number(amtStr || 0)
+      return { bank: (bank || '').trim(), amount: isNaN(amt) ? '' : String(amt) }
+    }).filter(x => x.bank && Number(x.amount) > 0)
+  }
+  const [bankSplits, setBankSplits] = useState(parseSplitsFromName(initialExpense?.name))
 
   // Bank icon resolver for preview (uses public/banks images)
   const bankIconSrc = (name) => {
@@ -126,14 +140,42 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
       return
     }
     const chosenBank = bankChoice === 'Other' ? customBank.trim() : bankChoice
-    const payload = {
+    // Validate optional splits if provided
+    const splitsClean = (bankSplits || []).map((r) => ({ bank: String(r.bank||'').trim(), amount: Number(r.amount||0) }))
+      .filter(r => r.bank && !isNaN(r.amount) && r.amount > 0)
+    const sumSplits = splitsClean.reduce((s,r)=> s + Number(r.amount||0), 0)
+    if (splitsClean.length > 0 && sumSplits !== amt) {
+      toast.error(`Split amounts (₹${sumSplits.toLocaleString()}) must equal total (₹${amt.toLocaleString()})`)
+      setLoading(false)
+      return
+    }
+  const payload = {
       id: initialExpense?.id,
       name: nameSan.clean,
       payee: payeeSan.clean,
       amount: amt,
       date: when.toISOString(),
       kind,
-      bankName: chosenBank || undefined
+      bankName: splitsClean.length > 0 ? undefined : (chosenBank || undefined),
+      bankSplits: splitsClean.length > 0 ? splitsClean : undefined
+    }
+    // Validate banks against allocated payment sources
+    const allocatedLower = (allocatedBanks || []).map(b => String(b || '').toLowerCase().trim()).filter(Boolean)
+    if (splitsClean.length > 0) {
+      const unknown = splitsClean.filter(s => !allocatedLower.includes(String(s.bank || '').toLowerCase().trim()))
+      if (unknown.length > 0) {
+        const names = unknown.map(u => u.bank).join(', ')
+        toast.error(`Split includes bank(s) not in Payment Sources: ${names}. Add them in Budget > Payment Sources first.`)
+        setLoading(false)
+        return
+      }
+    } else if (chosenBank) {
+      const exists = allocatedLower.includes(String(chosenBank).toLowerCase().trim())
+      if (!exists) {
+        toast.error(`Selected bank "${chosenBank}" is not in Payment Sources. Add it in Budget > Payment Sources first.`)
+        setLoading(false)
+        return
+      }
     }
     if (mode === 'edit' && typeof onExpenseEdited === 'function') {
       onExpenseEdited(payload)
@@ -149,6 +191,7 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
       setExpenseDate('')
       setBankChoice('')
       setCustomBank('')
+      setBankSplits([])
       setLoading(false)
     }
   }
@@ -214,15 +257,16 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
           />
         </div>
 
-        {/* Payment Source (Bank) */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium text-black dark:text-white">Payment Source (Bank)</label>
-          <div className="grid grid-cols-[1fr,1fr] gap-2">
+        {/* Payment Sources */}
+      <div className="space-y-3">
+        <label className="text-sm font-medium text-black dark:text-white">Payment Sources</label>
+        {/* Single source selector for quick entry */}
+        <div className="grid grid-cols-[1fr,1fr] gap-2">
             <select
               value={bankChoice}
               onChange={(e)=>setBankChoice(e.target.value)}
               className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white"
-              disabled={loading}
+              disabled={loading || (bankSplits && bankSplits.length > 0)}
             >
               <option value="">Select bank</option>
               <option value="HDFC">HDFC</option>
@@ -239,21 +283,76 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
               onChange={(e)=>setCustomBank(e.target.value)}
               className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white"
               placeholder="Custom bank name"
-              disabled={loading || bankChoice !== 'Other'}
+              disabled={loading || bankChoice !== 'Other' || (bankSplits && bankSplits.length > 0)}
             />
           </div>
-          {/* Selected bank preview with icon */}
-          {(() => {
-            const chosen = bankChoice === 'Other' ? (customBank || '').trim() : bankChoice
-            const icon = bankIconSrc(chosen)
-            return chosen ? (
-              <div className="mt-1 flex items-center gap-1 text-[11px] text-black dark:text-white/80">
-            {icon ? (<img src={icon} alt={chosen} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
-                <span>{chosen}</span>
+          {/* Multi-source split rows */}
+          <div className="space-y-2">
+            <div className="text-xs text-gray-600 dark:text-white/70">Or split this amount across banks</div>
+            {(bankSplits || []).map((row, idx) => (
+              <div key={`split-${idx}`} className="grid grid-cols-[1fr,90px,30px] gap-2 items-center">
+                <select
+                  value={row.bank}
+                  onChange={(e)=>setBankSplits(prev=>prev.map((r,i)=> i===idx ? ({...r, bank: e.target.value}) : r))}
+                  className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white"
+                  disabled={loading}
+                >
+                  <option value="">Select bank</option>
+                  <option value="HDFC">HDFC</option>
+                  <option value="SBI">SBI</option>
+                  <option value="ICICI">ICICI</option>
+                  <option value="Central">Central</option>
+                  <option value="BOI">BOI</option>
+                  <option value="BOB">BOB</option>
+                  <option value="Other">Other…</option>
+                </select>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={row.amount}
+                  onChange={(e)=>setBankSplits(prev=>prev.map((r,i)=> i===idx ? ({...r, amount: e.target.value}) : r))}
+                  className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white"
+                  placeholder="₹ amt"
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  className="rounded-md bg-gray-100 dark:bg-zinc-700 px-2 text-sm"
+                  aria-label="Remove"
+                  onClick={()=>setBankSplits(prev=> prev.filter((_,i)=> i!==idx))}
+                  disabled={loading}
+                >×</button>
               </div>
-            ) : null
+            ))}
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                className="text-xs px-2 py-1 rounded-md bg-gray-100 dark:bg-zinc-700"
+                onClick={()=>setBankSplits(prev=>[...prev, { bank: '', amount: '' }])}
+                disabled={loading}
+              >Add split source</button>
+              <div className="text-xs text-gray-700 dark:text-white/70">
+                Allocated ₹{(bankSplits||[]).reduce((s,r)=> s + Number(r.amount||0), 0).toLocaleString()} of ₹{Number(expenseAmount||0).toLocaleString()}
+              </div>
+            </div>
+            </div>
+          <p className="text-xs text-gray-500 dark:text-white/60">When split is used, the total must equal Amount, and each bank will be shown with icon and amount in the list.</p>
+          {/* Inline warning if chosen banks not in allocated payment sources */}
+          {(() => {
+            const allocatedLower = (allocatedBanks || []).map(b => String(b || '').toLowerCase().trim()).filter(Boolean)
+            const splitsClean = (bankSplits || []).map(r => ({ bank: String(r.bank||'').trim(), amount: Number(r.amount||0) }))
+              .filter(r => r.bank && !isNaN(r.amount) && r.amount > 0)
+            const unknownSplits = splitsClean.filter(s => !allocatedLower.includes(String(s.bank || '').toLowerCase().trim()))
+            const warnSingle = (!splitsClean.length && bankChoice) && !allocatedLower.includes(String(bankChoice === 'Other' ? customBank.trim() : bankChoice).toLowerCase().trim())
+            if (unknownSplits.length > 0 || warnSingle) {
+              const names = unknownSplits.map(u => u.bank)
+              const singleName = warnSingle ? (bankChoice === 'Other' ? customBank.trim() : bankChoice) : null
+              const msg = names.length ? `Banks not in Payment Sources: ${names.join(', ')}` : `Bank not in Payment Sources: ${singleName}`
+              return <div className="text-xs mt-1 p-2 rounded-md bg-yellow-100 text-yellow-800 dark:bg-yellow-700/20 dark:text-yellow-200">{msg}. Add in Budget › Payment Sources first.</div>
+            }
+            return null
           })()}
-          <p className="text-xs text-gray-500 dark:text-white/60">This will be reflected near Remaining as per bank usage.</p>
         </div>
 
         <div className="space-y-2">
