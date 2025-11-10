@@ -8,7 +8,7 @@ const modes = [
   { key: 'year', label: 'Year' },
 ]
 
-const MiniSpendChart = ({ buyingExpenses = [], labourExpenses = [] }) => {
+const MiniSpendChart = ({ buyingExpenses = [], labourExpenses = [], buyingLabel = 'Buying', labourLabel = 'Labour' }) => {
   const [mode, setMode] = useState('10days')
   const [monthValue, setMonthValue] = useState(() => {
     const d = new Date()
@@ -179,8 +179,8 @@ const MiniSpendChart = ({ buyingExpenses = [], labourExpenses = [] }) => {
           />
       </div>
         <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400"></span> Buying</span>
-          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-pink-300"></span> Labour</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400"></span> {buyingLabel}</span>
+          <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-pink-300"></span> {labourLabel}</span>
         </div>
       </div>
       <div className="h-28 flex items-end gap-2 overflow-x-auto no-scrollbar">
@@ -192,8 +192,8 @@ const MiniSpendChart = ({ buyingExpenses = [], labourExpenses = [] }) => {
           return (
             <div key={b.key} className="flex flex-col items-center w-8 h-full flex-shrink-0">
               <div className="flex items-end gap-1 w-full h-full">
-                <div className="flex-1 bg-blue-400 rounded-sm" style={{ height: `${buyH}%` }} title={`Buying: ₹${buy.toLocaleString()}`}></div>
-                <div className="flex-1 bg-pink-300 rounded-sm" style={{ height: `${labH}%` }} title={`Labour: ₹${lab.toLocaleString()}`}></div>
+                <div className="flex-1 bg-blue-400 rounded-sm" style={{ height: `${buyH}%` }} title={`${buyingLabel}: ₹${buy.toLocaleString()}`}></div>
+                <div className="flex-1 bg-pink-300 rounded-sm" style={{ height: `${labH}%` }} title={`${labourLabel}: ₹${lab.toLocaleString()}`}></div>
               </div>
               <div className="mt-1 text-[10px] text-white/70 whitespace-nowrap">{b.label}</div>
             </div>

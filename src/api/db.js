@@ -102,14 +102,14 @@ export async function getBudgetForMonth(userId, categoryId, periodDate) {
   }
 }
 
-export async function upsertBudget(userId, categoryId, amount, periodDate) {
+export async function upsertBudget(userId, categoryId, amount, periodDate, allocations) {
   try {
     const d = new Date(periodDate || Date.now())
     const iso = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
     const res = await fetch('/api/budgets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, categoryId, amount, period: iso }),
+      body: JSON.stringify({ userId, categoryId, amount, period: iso, allocations }),
     })
     const json = await res.json()
     if (!res.ok || json?.error) return { data: null, error: new Error(json?.error || 'Failed to save budget') }

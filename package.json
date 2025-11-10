@@ -12,14 +12,16 @@
     "@supabase/supabase-js": "^2.78.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.1",
     "lucide-react": "^0.552.0",
     "next": "16.0.1",
+    "pdfkit": "^0.17.2",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^3.3.1",
-    "jspdf": "^2.5.1",
-    "jspdf-autotable": "^3.8.1"
+    "svg-to-pdfkit": "^0.1.8",
+    "tailwind-merge": "^3.3.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

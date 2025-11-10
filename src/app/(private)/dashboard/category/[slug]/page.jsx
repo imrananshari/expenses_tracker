@@ -21,7 +21,7 @@ const CategoryPage = () => {
   const router = useRouter()
   const params = useParams()
   const { user, loading, signOut } = useAuth()
-  const { addRecentExpense, updateRecentExpense, getCategoryData, setCategoryData } = useDashboardData()
+  const { addRecentExpense, updateRecentExpense, getCategoryData, setCategoryData, setCategoryBudgets } = useDashboardData()
   const slug = params.slug
   const [category, setCategory] = useState(null) // { id: dbId, name, slug }
   const displayName = (user?.user_metadata?.name || user?.email || '').split('@')[0]
@@ -33,12 +33,13 @@ const CategoryPage = () => {
   const [expensesBuying, setExpensesBuying] = useState([])
   const [expensesLabour, setExpensesLabour] = useState([])
   const [topups, setTopups] = useState([])
+  const [bankAllocations, setBankAllocations] = useState([]) // [{bank, amount}]
   const [showBudgetForm, setShowBudgetForm] = useState(false)
   const [budgetLoading, setBudgetLoading] = useState(true)
   const [showExpenseModal, setShowExpenseModal] = useState(false)
   const [editingExpense, setEditingExpense] = useState(null)
   const [showTopupModal, setShowTopupModal] = useState(false)
-  const [topupForm, setTopupForm] = useState({ amount: '', date: '', reason: '', type: '' })
+  const [topupForm, setTopupForm] = useState({ amount: '', date: '', reason: '', type: '', bankChoice: '', customBank: '', hdfcAmt: '', sbiAmt: '', iciciAmt: '', otherAmt: '' })
   const [addingTopup, setAddingTopup] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [showNotifications, setShowNotifications] = useState(false)
@@ -78,8 +79,52 @@ const CategoryPage = () => {
   const totalSpent = totalBuying + totalLabour
   const overspent = Math.max(0, totalSpent - Number(budget || 0))
   const remaining = Math.max(0, Number(budget || 0) - totalSpent)
-  const dominantKind = totalBuying >= totalLabour ? 'Buying' : 'Labour'
+  // Dynamic labels for chart legend and titles based on category name
+  const inferLabels = (name) => {
+    const n = String(name || '').toLowerCase()
+    if (n.includes('shop') || n.includes('store')) return { primary: 'Purchase', secondary: 'Sales' }
+    if (n.includes('grocery')) return { primary: 'Groceries', secondary: 'Other' }
+    if (n.includes('personal')) return { primary: 'Personal', secondary: 'Other' }
+    if (n.includes('subscription')) return { primary: 'Subscriptions', secondary: 'Other' }
+    if (n.includes('other')) return { primary: 'Expenses', secondary: 'Misc' }
+    if (n.includes('home')) return { primary: 'Buying', secondary: 'Labour' }
+    return { primary: 'Buying', secondary: isHomeBuilding ? 'Labour' : 'Other' }
+  }
+  const { primary: buyingLabel, secondary: labourLabel } = inferLabels(category?.name || '')
+  const dominantKind = totalBuying >= totalLabour ? buyingLabel : labourLabel
   const dominantAmount = totalBuying >= totalLabour ? totalBuying : totalLabour
+
+  // Per-bank spending (current month) based on tag in note: [Bank: NAME]
+  const parseBankTag = (note) => {
+    const s = String(note || '')
+    const m = s.match(/\[Bank:\s*([^\]]+)\]/i)
+    return m ? m[1].trim() : null
+  }
+  const bankSpentMap = useMemo(() => {
+    const map = new Map()
+    const all = [...(expensesBuying||[]), ...(expensesLabour||[])]
+    all.forEach(e => {
+      const d = e?.date ? new Date(e.date) : null
+      if (!d || d < monthStart || d >= monthEnd) return
+      const tag = parseBankTag(e.name)
+      if (!tag) return
+      map.set(tag, (map.get(tag) || 0) + Number(e.amount || 0))
+    })
+    return map
+  }, [expensesBuying, expensesLabour, monthStart.getTime(), monthEnd.getTime()])
+
+  // Parse split banks from a top-up note format: "... [Split: HDFC=2000;SBI=1500;ICICI=1000;Custom=500]"
+  const parseTopupSplits = (note) => {
+    const s = String(note || '')
+    const m = s.match(/\[Split:\s*([^\]]+)\]/i)
+    if (!m) return []
+    const body = m[1]
+    return body.split(';').map(tok => tok.trim()).filter(Boolean).map(tok => {
+      const [bank, amtStr] = tok.split('=')
+      const amt = Number(amtStr || 0)
+      return { bank: (bank || '').trim(), amount: isNaN(amt) ? 0 : amt }
+    }).filter(x => x.bank && x.amount > 0)
+  }
 
   useEffect(() => {
     const loadData = async () => {
@@ -95,6 +140,7 @@ const CategoryPage = () => {
           setExpensesBuying(cached.expensesBuying || [])
           setExpensesLabour(cached.expensesLabour || [])
           setTopups(cached.topups || [])
+          setBankAllocations(cached.bankAllocations || [])
           setOverlayVisible(false)
           setBudgetLoading(false)
         } else {
@@ -117,6 +163,9 @@ const CategoryPage = () => {
           setBudget(budgetRow.amount)
           setBudgetId(budgetRow.id)
           setShowBudgetForm(false)
+          if (Array.isArray(budgetRow.allocations)) {
+            setBankAllocations(budgetRow.allocations.map(a => ({ bank: a.bank, amount: a.amount, source_id: a.source_id })))
+          }
         } else {
           setBudget(0)
           setBudgetId(null)
@@ -235,9 +284,11 @@ const CategoryPage = () => {
     }
   }
 
-  const handleBudgetSet = async (amount) => {
+  const handleBudgetSet = async (payload) => {
     if (!category || !user) return
-    const { data, error } = await upsertBudget(user.id, category.id, amount)
+    const amount = typeof payload === 'number' ? payload : Number(payload?.amount || 0)
+    const allocations = (typeof payload === 'object' && Array.isArray(payload.allocations)) ? payload.allocations : []
+    const { data, error } = await upsertBudget(user.id, category.id, amount, undefined, allocations)
     if (error) {
       console.error(error)
       toast.error(error.message)
@@ -246,13 +297,27 @@ const CategoryPage = () => {
     setBudget(data.amount)
     setBudgetId(data.id)
     setShowBudgetForm(false)
+    // Prefer server-confirmed allocations if present (with source_id)
+    setBankAllocations(Array.isArray(data?.allocations) ? data.allocations.map(a => ({ bank: a.bank, amount: a.amount, source_id: a.source_id })) : allocations)
     // update cache
-    setCategoryData(slug, { budget: data.amount, budgetId: data.id, showBudgetForm: false })
+    setCategoryData(slug, { budget: data.amount, budgetId: data.id, showBudgetForm: false, bankAllocations: Array.isArray(data?.allocations) ? data.allocations.map(a => ({ bank: a.bank, amount: a.amount, source_id: a.source_id })) : allocations })
+    // also update shared dashboard budgets so totals reflect instantly
+    try {
+      setCategoryBudgets(prev => {
+        const list = Array.isArray(prev) ? prev : []
+        const exists = list.some(b => b.slug === category.slug)
+        return exists
+          ? list.map(b => (b.slug === category.slug ? { ...b, amount: data.amount } : b))
+          : [{ name: category.name, slug: category.slug, amount: data.amount }, ...list]
+      })
+    } catch {}
   }
 
   const handleExpenseAdded = async (expense) => {
     if (!category || !user) return
-    const { data, error } = await addExpense(user.id, { categoryId: category.id, budgetId, amount: expense.amount, note: expense.name, payee: expense.payee, kind: expense.kind, spentAt: expense.date })
+    const bankTag = (expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
+    const noteWithBank = `${expense.name}${bankTag}`
+    const { data, error } = await addExpense(user.id, { categoryId: category.id, budgetId, amount: expense.amount, note: noteWithBank, payee: expense.payee, kind: expense.kind, spentAt: expense.date })
     if (error) {
       console.error(error)
       toast.error(error.message)
@@ -287,10 +352,12 @@ const CategoryPage = () => {
 
   const handleExpenseEdited = async (expense) => {
     if (!category || !user || !editingExpense) return
+    const bankTag = (expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
+    const noteWithBank = `${expense.name}${bankTag}`
     const payload = {
       id: editingExpense.id,
       amount: expense.amount,
-      note: expense.name,
+      note: noteWithBank,
       payee: expense.payee,
       kind: editingExpense.kind,
       spentAt: expense.date,
@@ -322,7 +389,7 @@ const CategoryPage = () => {
     const y = today.getFullYear()
     const m = String(today.getMonth()+1).padStart(2,'0')
     const d = String(today.getDate()).padStart(2,'0')
-    setTopupForm({ amount: '', date: `${y}-${m}-${d}`, reason: '', type: '' })
+    setTopupForm({ amount: '', date: `${y}-${m}-${d}`, reason: '', type: '', bankChoice: '', customBank: '', hdfcAmt: '', sbiAmt: '', iciciAmt: '', otherAmt: '' })
     setShowTopupModal(true)
   }
 
@@ -333,11 +400,33 @@ const CategoryPage = () => {
       toast.error('Enter a valid amount')
       return
     }
+    // Build per-source allocations from the form
+    const otherName = (topupForm.customBank || '').trim()
+    const otherAmt = Number(topupForm.otherAmt || 0)
+    if (otherAmt > 0 && !otherName) {
+      toast.error('Enter a custom bank name for Other amount')
+      return
+    }
+    const additionsRaw = [
+      { bank: 'HDFC', amount: Number(topupForm.hdfcAmt || 0) },
+      { bank: 'SBI', amount: Number(topupForm.sbiAmt || 0) },
+      { bank: 'ICICI', amount: Number(topupForm.iciciAmt || 0) },
+      { bank: otherName, amount: otherAmt },
+    ]
+    const additions = additionsRaw.filter(a => a.bank && !isNaN(a.amount) && a.amount > 0)
+    const sumAdditions = additions.reduce((s,a)=>s + Number(a.amount||0), 0)
+    if (sumAdditions !== amt) {
+      toast.error(`Split amounts (₹${sumAdditions.toLocaleString()}) must equal total (₹${amt.toLocaleString()})`)
+      return
+    }
+    // Compute updated totals for touched sources
+    const existingMap = new Map((bankAllocations || []).map(a => [String(a.bank), Number(a.amount || 0)]))
+    const updatedTouched = additions.map(a => ({ bank: a.bank, amount: (existingMap.get(String(a.bank)) || 0) + Number(a.amount || 0) }))
     setAddingTopup(true)
     try {
       // Increase budget for this month
       const newBudget = Number(budget || 0) + amt
-      const { data: bData, error: bErr } = await upsertBudget(user.id, category.id, newBudget)
+      const { data: bData, error: bErr } = await upsertBudget(user.id, category.id, newBudget, undefined, updatedTouched)
       if (bErr) {
         console.error(bErr)
         toast.error('Failed to update budget')
@@ -345,13 +434,24 @@ const CategoryPage = () => {
       }
       setBudget(bData.amount)
       setBudgetId(bData.id)
+      // Merge returned allocations into local state
+      const returnedAllocs = Array.isArray(bData?.allocations) ? bData.allocations.map(a => ({ bank: a.bank, amount: a.amount, source_id: a.source_id })) : []
+      const mergedMap = new Map((bankAllocations || []).map(a => [String(a.bank), { bank: a.bank, amount: Number(a.amount||0), source_id: a.source_id }]))
+      returnedAllocs.forEach(a => {
+        mergedMap.set(String(a.bank), { bank: a.bank, amount: Number(a.amount||0), source_id: a.source_id })
+      })
+      const merged = Array.from(mergedMap.values())
+      setBankAllocations(merged)
+      setCategoryData(slug, { bankAllocations: merged, budget: bData.amount, budgetId: bData.id })
 
       // Record the top-up entry (stored in expenses with kind 'topup')
+      const splitTag = additions.map(a => `${a.bank}=${Number(a.amount||0)}`).join(';')
+      const noteWithBank = `${topupForm.reason || 'Added to budget'}${splitTag ? ` [Split: ${splitTag}]` : ''}`
       const { data: tData, error: tErr } = await addExpense(user.id, {
         categoryId: category.id,
         budgetId: bData.id,
         amount: amt,
-        note: topupForm.reason || 'Added to budget',
+        note: noteWithBank,
         payee: topupForm.type || null,
         kind: 'topup',
         spentAt: topupForm.date || undefined,
@@ -369,7 +469,7 @@ const CategoryPage = () => {
         ]))
       }
       setShowTopupModal(false)
-      setTopupForm({ amount: '', date: '', reason: '', type: '' })
+      setTopupForm({ amount: '', date: '', reason: '', type: '', bankChoice: '', customBank: '', hdfcAmt: '', sbiAmt: '', iciciAmt: '', otherAmt: '' })
       toast.success('Budget increased')
     } finally {
       setAddingTopup(false)
@@ -413,7 +513,7 @@ const CategoryPage = () => {
 
   const handleExportPdf = async (kind) => {
     const data = kind === 'buying' ? filteredBuying : filteredLabour
-    const title = `${category?.name || 'Category'} • ${kind === 'buying' ? 'Buying' : 'Labour'} Expenses`
+    const title = `${category?.name || 'Category'} • ${kind === 'buying' ? buyingLabel : labourLabel} Expenses`
     const labels = kind === 'buying'
       ? { nameLabel: 'Expense Name', payeeLabel: 'Where/Who (shop)', amountLabel: 'Amount (₹)', dateLabel: 'Spent Date' }
       : { nameLabel: 'Labour Name', payeeLabel: 'Worker', amountLabel: 'Amount (₹)', dateLabel: 'Spent Date' }
@@ -427,6 +527,7 @@ const CategoryPage = () => {
       labels,
       budgetAmount: Number(budget || 0),
       totalSpent: totalSpentAll,
+      bankSplits: Array.isArray(bankAllocations) ? bankAllocations : [],
     })
   }
 
@@ -442,6 +543,19 @@ const CategoryPage = () => {
     if (n.includes('subscription')) return CreditCard
     if (n.includes('personal')) return User
     return MoreHorizontal
+  }
+
+  // Resolve bank icon from name (fallback to null if unknown)
+  const bankIconSrc = (name) => {
+    const n = (name || '').toLowerCase().trim()
+    if (!n) return null
+    if (n.includes('hdfc')) return '/banks/hdfc.png'
+    if (n.includes('sbi')) return '/banks/sbi.png'
+    if (n.includes('icici')) return '/banks/icici.png'
+    if (n.includes('central')) return '/banks/central.png'
+    if (n.includes('bank of india') || n === 'boi') return '/banks/boi.png'
+    if (n.includes('bank of baroda') || n === 'bob') return '/banks/bob.png'
+    return null
   }
 
   // Visible counts per list for incremental loading (declare BEFORE any conditional returns)
@@ -559,6 +673,28 @@ const CategoryPage = () => {
                   <span>Add to Budget</span>
                 </button>
               </div>
+              {bankAllocations.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-xs text-white/80 mb-1">Payment Sources</div>
+                  <div className="flex flex-wrap gap-2">
+                    {bankAllocations.map((a, idx) => {
+                      const used = bankSpentMap.get(String(a.bank)) || 0
+                      const icon = a.image_url || bankIconSrc(a.bank)
+                      return (
+                        <span key={`${a.bank}-${idx}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 text-white text-[11px] ring-1 ring-white/20">
+                          {icon ? (
+            <img src={icon} alt={a.bank || 'Bank'} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />
+                          ) : (
+                            <span className="font-medium">{a.bank || 'Bank'}</span>
+                          )}
+                          <span className="opacity-80">• Used ₹{Number(used).toLocaleString()}</span>
+                          <span className="opacity-60">/ ₹{Number(a.amount || 0).toLocaleString()}</span>
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Alert strip */}
@@ -580,26 +716,41 @@ const CategoryPage = () => {
             )}
 
             {/* Mini bar chart below alert */}
-            <MiniSpendChart buyingExpenses={expensesBuying} labourExpenses={isHomeBuilding ? expensesLabour : []} />
+            <MiniSpendChart buyingExpenses={expensesBuying} labourExpenses={isHomeBuilding ? expensesLabour : []} buyingLabel={buyingLabel} labourLabel={labourLabel} />
 
             {/* Small list of recent budget additions */}
             {topups.length > 0 && (
               <div className="mt-3 p-3 bg-white/10 rounded-xl">
                 <div className="text-xs text-white/80 mb-2">Budget Additions</div>
                 <div className="space-y-1">
-                  {topups.slice(0,3).map(t => (
-                    <div key={t.id} className="flex items-center justify-between text-xs text-white/90">
-                      <div className="truncate">
-                        <span className="font-medium">₹{Number(t.amount).toLocaleString()}</span>
-                        <span className="opacity-80"> • {t.reason}</span>
-                        {t.type ? <span className="opacity-60"> • {t.type}</span> : null}
+                    {topups.slice(0,3).map(t => (
+                      <div key={t.id} className="flex items-center justify-between text-xs text-white/90">
+                        <div className="truncate">
+                          <span className="font-medium">₹{Number(t.amount).toLocaleString()}</span>
+                          <span className="opacity-80"> • {String(t.reason || '').replace(/\s*\[Split:[^\]]+\]\s*/i,'').trim()}</span>
+                          {t.type ? <span className="opacity-60"> • {t.type}</span> : null}
+                          {/* Split bank chips */}
+                          {parseTopupSplits(t.reason).length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {parseTopupSplits(t.reason).map((s, idx) => (
+                                <span key={`${t.id}-split-${idx}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/10 text-white text-[10px] ring-1 ring-white/20">
+                                  {bankIconSrc(s.bank) ? (
+            <img src={bankIconSrc(s.bank)} alt={s.bank} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />
+                                  ) : (
+                                    <span className="font-medium">{s.bank}</span>
+                                  )}
+                                  <span className="opacity-70">₹{Number(s.amount).toLocaleString()}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="opacity-60">{new Date(t.date).toLocaleDateString()}</div>
                       </div>
-                      <div className="opacity-60">{new Date(t.date).toLocaleDateString()}</div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
           </div>
         )}
       </div>
@@ -686,6 +837,10 @@ const CategoryPage = () => {
                 <div className="space-y-2">
                   {filteredBuying.slice(0, visibleCounts.buying).map((e) => {
                     const CatIcon = getCategoryIcon(category?.name)
+                    const bankMatch = String(e.name || '').match(/\[Bank:\s*([^\]]+)\]/i)
+                    const bankName = bankMatch ? bankMatch[1].trim() : ''
+                    const displayName = String(e.name || 'Expense').replace(/\s*\[Bank:[^\]]+\]\s*/i,'').trim()
+                    const bankIcon = bankIconSrc(bankName)
                     return (
                       <div key={e.id} className="group flex items-center justify-between py-2">
                         <div className="flex items-center gap-3">
@@ -693,7 +848,11 @@ const CategoryPage = () => {
                             <CatIcon className="w-4 h-4 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                           </span>
                           <div className="leading-tight">
-                            <div className="text-sm font-medium">{e.name || 'Expense'}{e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
+                            <div className="text-sm font-medium flex items-center gap-1">
+                              <span>{displayName || 'Expense'}</span>
+        {bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
+                              {e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}
+                            </div>
                             <div className="text-[11px] text-black">{category?.name}{e.payee ? ` • ${e.payee}` : ''}</div>
                           </div>
                         </div>
@@ -759,6 +918,10 @@ const CategoryPage = () => {
                 <div className="space-y-2">
                     {filteredLabour.slice(0, visibleCounts.labour).map((e) => {
                     const CatIcon = getCategoryIcon(category?.name)
+                    const bankMatch = String(e.name || '').match(/\[Bank:\s*([^\]]+)\]/i)
+                    const bankName = bankMatch ? bankMatch[1].trim() : ''
+                    const displayName = String(e.name || 'Expense').replace(/\s*\[Bank:[^\]]+\]\s*/i,'').trim()
+                    const bankIcon = bankIconSrc(bankName)
                     return (
                       <div key={e.id} className="group flex items-center justify-between py-2">
                         <div className="flex items-center gap-3">
@@ -766,7 +929,11 @@ const CategoryPage = () => {
                             <CatIcon className="w-4 h-4 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                           </span>
                           <div className="leading-tight">
-                            <div className="text-sm font-medium">{e.name || 'Expense'}{e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
+                            <div className="text-sm font-medium flex items-center gap-1">
+                              <span>{displayName || 'Expense'}</span>
+        {bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
+                              {e.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}
+                            </div>
                             <div className="text-[11px] text-black">{category?.name}{e.payee ? ` • ${e.payee}` : ''}</div>
                           </div>
                         </div>
@@ -853,6 +1020,37 @@ const CategoryPage = () => {
                 <div className="space-y-1">
                 <label className="text-sm font-medium text-black dark:text-white">Type</label>
                 <input type="text" value={topupForm.type} onChange={(e)=>setTopupForm(prev=>({...prev, type: e.target.value}))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 border border-gray-200 dark:border-zinc-600 text-black dark:text-white placeholder:text-black/70 dark:placeholder:text-black/70 caret-black" placeholder="e.g. Cash, Bank transfer" />
+                </div>
+                {/* Payment Sources Allocation */}
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-black dark:text-white">Payment Sources Allocation</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+        <div className="text-xs mb-1 flex items-center gap-1"><img src="/banks/hdfc.png" alt="HDFC" className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} /><span>HDFC</span></div>
+                      <input type="number" min="0" step="0.01" value={topupForm.hdfcAmt} onChange={(e)=>setTopupForm(prev=>({...prev, hdfcAmt: e.target.value }))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white" placeholder="e.g. 2,000" />
+                    </div>
+                    <div>
+        <div className="text-xs mb-1 flex items-center gap-1"><img src="/banks/sbi.png" alt="SBI" className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} /><span>SBI</span></div>
+                      <input type="number" min="0" step="0.01" value={topupForm.sbiAmt} onChange={(e)=>setTopupForm(prev=>({...prev, sbiAmt: e.target.value }))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white" placeholder="e.g. 1,500" />
+                    </div>
+                    <div>
+        <div className="text-xs mb-1 flex items-center gap-1"><img src="/banks/icici.png" alt="ICICI" className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} /><span>ICICI</span></div>
+                      <input type="number" min="0" step="0.01" value={topupForm.iciciAmt} onChange={(e)=>setTopupForm(prev=>({...prev, iciciAmt: e.target.value }))} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white" placeholder="e.g. 1,000" />
+                    </div>
+                    <div>
+                      <div className="text-xs mb-1 flex items-center gap-1">
+                        {bankIconSrc(topupForm.customBank) ? (
+        <img src={bankIconSrc(topupForm.customBank)} alt={topupForm.customBank || 'Other'} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />
+                        ) : null}
+                        <span>Other</span>
+                      </div>
+                      <div className="grid grid-cols-[1fr,1fr] gap-2">
+                        <input type="text" value={topupForm.customBank} onChange={(e)=>setTopupForm(prev=>({...prev, customBank: e.target.value }))} className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white" placeholder="Custom bank name" />
+                        <input type="number" min="0" step="0.01" value={topupForm.otherAmt} onChange={(e)=>setTopupForm(prev=>({...prev, otherAmt: e.target.value }))} className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white" placeholder="e.g. 500" />
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-white/60">Ensure these add up to the total being added.</p>
                 </div>
               <button type="button" onClick={handleTopupSubmit} disabled={addingTopup} className="w-full rounded-md bg-brand-dark text-white py-2 ring-1 ring-[var(--brand-primary)]/30 disabled:opacity-60">
                 {addingTopup ? 'Adding...' : 'Add Amount'}

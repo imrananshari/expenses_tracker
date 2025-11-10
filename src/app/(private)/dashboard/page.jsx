@@ -47,6 +47,12 @@ import { useDashboardData } from '@/hooks/useDashboardData'
   const [overlayVisible, setOverlayVisible] = useState(true)
   const overlayStartRef = useRef(0)
 
+  // Keep local UI state in sync with shared dashboard cache so edits reflect instantly
+  React.useEffect(() => { setCategories(cachedCategories || []) }, [cachedCategories])
+  React.useEffect(() => { setCategoryBudgets(cachedBudgets || []) }, [cachedBudgets])
+  React.useEffect(() => { setRecent(cachedRecent || []) }, [cachedRecent])
+  React.useEffect(() => { setNotifications(cachedNotifications || []) }, [cachedNotifications])
+
   // Identify Shop Store categories so they can be excluded from the main dashboard Categories list
   const SHOP_TEMPLATES = [
     'Cloths Garments',
@@ -602,6 +608,9 @@ import { useDashboardData } from '@/hooks/useDashboardData'
               const catItem = (categories || []).find(c => c.id === r.category_id)
               const catName = catItem?.name || 'Category'
               const CatIcon = getCategoryIcon(catName)
+              const bankName = parseBankTag(r.note)
+              const displayName = String(r.note || 'Expense').replace(/\s*\[Bank:[^\]]+\]\s*/i,'').trim()
+              const bankIcon = bankIconSrc(bankName)
               return (
                 <div key={r.id} className="group flex items-center justify-between py-2">
                   <div className="flex items-center gap-3">
@@ -609,7 +618,11 @@ import { useDashboardData } from '@/hooks/useDashboardData'
                       <CatIcon className="w-4 h-4 text-white transition-transform group-hover:rotate-12 group-active:-rotate-12" />
                     </span>
                     <div className="leading-tight">
-                      <div className="text-sm font-medium">{r.note || 'Expense'}{r.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}</div>
+                      <div className="text-sm font-medium flex items-center gap-1">
+                        <span>{displayName || 'Expense'}</span>
+                        {bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
+                        {r.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}
+                      </div>
                       <div className="text-[11px] text-black">{catName}{r.payee ? ` • ${r.payee}` : ''}</div>
                     </div>
                   </div>
@@ -636,3 +649,22 @@ import { useDashboardData } from '@/hooks/useDashboardData'
 }
 
 export default Dashboard
+  // Resolve bank icon PNG path (local public/banks or null)
+  const bankIconSrc = (name) => {
+    const n = (name || '').toLowerCase().trim()
+    if (!n) return null
+    if (n.includes('hdfc')) return '/banks/hdfc.png'
+    if (n.includes('sbi')) return '/banks/sbi.png'
+    if (n.includes('icici')) return '/banks/icici.png'
+    if (n.includes('central')) return '/banks/central.png'
+    if (n.includes('bank of india') || n === 'boi') return '/banks/boi.png'
+    if (n.includes('bank of baroda') || n === 'bob') return '/banks/bob.png'
+    return null
+  }
+
+  // Extract bank tag from note: [Bank: NAME]
+  const parseBankTag = (note) => {
+    const s = String(note || '')
+    const m = s.match(/\[Bank:\s*([^\]]+)\]/i)
+    return m ? m[1].trim() : ''
+  }

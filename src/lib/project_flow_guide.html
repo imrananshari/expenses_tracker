@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Project Flow – PDF Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+      .card { max-width: 780px; margin: 0 auto; padding: 16px; border: 1px solid #ddd; border-radius: 8px; }
+      .btn { display: inline-block; padding: 8px 12px; background: #111; color: #fff; border-radius: 6px; text-decoration: none; }
+      .note { color: #666; font-size: 13px; margin-top: 8px; }
+    </style>
+    <!-- jsPDF & autotable from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" integrity="sha512-GWvS6cS4kqQm7P9lQ3nWqHfKNkHmhbM1WQIfdQbE1oWl2yQ5P6D4D2JcJH1ZriYtP8C3QH5bYc7zGQ9tU6ZLxw==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.3/jspdf.plugin.autotable.min.js" integrity="sha512-6f+2V2lRZJ3VQJt1c4XKkWvHgk3cI8r1NwEo0Uu3Wm0qbkfK1HfDkWJ3f6RrT0i/9Mjl7kUSlM2z6kQHfIYUxg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Project Flow – PDF Generator</h1>
+      <p>This standalone file generates a PDF guide for your Budget Tracker project. Click the button to download the PDF, or just open the file and it will auto-generate.</p>
+      <a href="#" class="btn" onclick="generate(); return false;">Generate PDF</a>
+      <div class="note">Tip: You can copy this file anywhere on your PC and open it; it doesn’t require your dev server.</div>
+    </div>
+
+    <script>
+      async function generate() {
+        const { jsPDF } = window.jspdf
+        const doc = new jsPDF()
+        const marginL = 14
+        let y = 18
+
+        doc.setFontSize(16)
+        doc.text('Budget Tracker – Project Flow Guide', marginL, y)
+        y += 22
+
+        function addSection(title, body) {
+          doc.setFontSize(13)
+          doc.text(String(title), marginL, y)
+          y += 6
+          doc.setFontSize(10)
+          const lines = doc.splitTextToSize(String(body), 182)
+          doc.text(lines, marginL, y)
+          y += (lines.length * 5) + 6
+          if (y > 270) { doc.addPage(); y = 20 }
+        }
+
+        addSection('Overview', 'This Next.js (App Router) project implements a mobile-first budget tracker. It uses client-side React components, a shared dashboard data provider for caching, and Supabase (via API helpers) for persistent data and file storage (avatars). The architecture favors quick navigation with minimal re-fetching and supports exporting reports to PDF.')
+
+        addSection('Structure & Routing', 'App directory structure under src/app uses the App Router. Private routes live under src/app/(private)/dashboard/* (dashboard, category pages, shop). Shared UI and forms are in src/app/components/budget/*. The layout files src/app/layout.js and src/app/(private)/layout.jsx provide global and private wrappers, respectively.')
+
+        addSection('Authentication', 'Auth helpers are provided in src/hooks/useAuth.js (session, user, signOut). Private pages gate on auth and show a loading overlay while session resolves. The dashboard reads effectiveUser and profile to render header state including avatar and initials.')
+
+        addSection('Data & API Layer', 'API helpers in src/api/db.js include categories (getUserCategories, addCategory), budgets (getBudgetForMonth, upsertBudget, getBudgetsForMonthBulk), expenses (listExpenses, addExpense, updateExpense, listRecentExpenses), notifications (listNotifications), and avatars (uploadAvatarDataUrl, getProfileForUser, getPublicAvatarUrl). Components call these functions; Next.js API routes under src/app/api/* proxy to Supabase. Avatars are stored in the Supabase storage bucket “avatars”, with public URLs built by getPublicAvatarUrl.')
+
+        addSection('State & Caching', 'src/hooks/useDashboardData.js provides a context that caches top-level data (categories, budgets, recent, notifications) and a per-category cache (categoryCache) to avoid reloading when revisiting category pages. Pages hydrate from cache instantly and then refresh in the background, updating only changed pieces to avoid full re-renders.')
+
+        addSection('Rendering Flow', 'Dashboard shows a header with avatar; recent list uses IntersectionObserver with an invisible sentinel to implement incremental “load more” without visible loaders. Category pages render “Buying” and “Labour” sections; for non-home-building categories the buying header layout was adjusted per requirements. Infinite scroll in category lists also uses sentinel elements kept invisible to preserve functionality.')
+
+        addSection('Performance & Avoiding Re-renders', 'Avatar URLs now avoid cache-busting, allowing browser caching across navigations. DashboardDataProvider minimizes re-renders by keeping shared lists and updating selectively (addRecentExpense, updateRecentExpense). Category pages reuse cached data via getCategoryData/setCategoryData and only merge deltas after background refresh.')
+
+        addSection('Security & Sanitization', 'Text inputs in ExpenseForm and numeric inputs in BudgetForm are sanitized using src/lib/sanitize.js. sanitizeTextStrict strips HTML tags, normalizes whitespace, and blocks URL/domain-like strings. sanitizeAmount parses positive numbers and rejects invalid values. This prevents URL/tag injection and harmful links from entering the database.')
+
+        addSection('PDF Exports', 'src/lib/pdf.js uses jsPDF and jspdf-autotable to export expenses with a budget summary. Logos are converted to PNG data URLs (SVG capability included). Fonts are loaded from local or CDN to ensure the ₹ glyph renders correctly.')
+
+        addSection('Key Files', '- src/app/(private)/dashboard/page.jsx: Dashboard UI, header, avatar logic, recent\n- src/app/(private)/dashboard/category/[slug]/page.jsx: Category UI, buying/labour forms, filters, infinite scroll\n- src/app/components/budget/ExpenseForm.jsx: Add/Edit expenses, now sanitized\n- src/app/components/budget/BudgetForm.jsx: Set budgets, now sanitized\n- src/hooks/useDashboardData.js: Shared cache and state for data and category revisits\n- src/api/db.js: API helpers and storage utilities\n- src/lib/pdf.js: PDF generation utilities')
+
+        addSection('How Data Flows (Step-by-Step)', '1) User authenticates via useAuth; private layouts gate routes.\n2) Dashboard loads profile via getProfileForUser; avatar resolves via stable public URL.\n3) DashboardDataProvider initializes categories, budgets, recent, notifications and caches them.\n4) Category page: reads cache via getCategoryData(slug) to render immediately; then fetches budget and expenses and merges updates via setCategoryData.\n5) Adding or editing an expense updates local UI and writes to API; provider updates recent list with addRecentExpense/updateRecentExpense.\n6) Infinite scroll observers increase the visible count when the sentinel intersects, without visible loaders.')
+
+        const dateStr = new Date().toISOString().slice(0, 10)
+        doc.save(`project_flow_guide_${dateStr}.pdf`)
+      }
+
+      // Auto-generate on open
+      window.addEventListener('load', () => {
+        try { generate() } catch (e) { /* ignore */ }
+      })
+    </script>
+  </body>
+</html>

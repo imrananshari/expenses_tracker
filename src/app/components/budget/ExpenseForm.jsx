@@ -5,7 +5,12 @@ import { toast } from 'sonner'
 import { sanitizeTextStrict, sanitizeAmount } from '@/lib/sanitize'
 
 const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpense, mode = 'add', kind = 'buying', payeeLabel = 'Where/Who (shop or receiver)', categoryName = '' }) => {
-  const [expenseName, setExpenseName] = useState(initialExpense?.name || '')
+  // Extract existing bank tag from the initial name, e.g. "[Bank: HDFC]"
+  const bankTagMatch = (initialExpense?.name || '').match(/\[Bank:\s*([^\]]+)\]/)
+  const initialBankName = bankTagMatch ? bankTagMatch[1].trim() : ''
+  const nameWithoutBankTag = (initialExpense?.name || '').replace(/\s*\[Bank:\s*[^\]]+\]\s*/,'').trim()
+
+  const [expenseName, setExpenseName] = useState(nameWithoutBankTag)
   const [payee, setPayee] = useState(initialExpense?.payee || '')
   const [expenseAmount, setExpenseAmount] = useState(initialExpense?.amount ? String(initialExpense.amount) : '')
   const [expenseDate, setExpenseDate] = useState(() => {
@@ -18,6 +23,26 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
     return ''
   })
   const [loading, setLoading] = useState(false)
+  // Prefill bank selection for edit mode
+  const prefillChoice = initialBankName
+    ? (['HDFC','SBI','ICICI','Central','BOI','BOB'].includes(initialBankName) ? initialBankName : 'Other')
+    : ''
+  const prefillCustom = initialBankName && !['HDFC','SBI','ICICI','Central','BOI','BOB'].includes(initialBankName) ? initialBankName : ''
+  const [bankChoice, setBankChoice] = useState(prefillChoice) // '', 'HDFC', 'SBI', 'ICICI', 'Other'
+  const [customBank, setCustomBank] = useState(prefillCustom)
+
+  // Bank icon resolver for preview (uses public/banks images)
+  const bankIconSrc = (name) => {
+    const n = (name || '').toLowerCase().trim()
+    if (!n) return null
+    if (n.includes('hdfc')) return '/banks/hdfc.png'
+    if (n.includes('sbi')) return '/banks/sbi.png'
+    if (n.includes('icici')) return '/banks/icici.png'
+    if (n.includes('central')) return '/banks/central.png'
+    if (n.includes('bank of india') || n === 'boi') return '/banks/boi.png'
+    if (n.includes('bank of baroda') || n === 'bob') return '/banks/bob.png'
+    return null
+  }
 
   // Today string for max date (disable future dates)
   const todayStr = (() => {
@@ -100,13 +125,15 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
       setLoading(false)
       return
     }
+    const chosenBank = bankChoice === 'Other' ? customBank.trim() : bankChoice
     const payload = {
       id: initialExpense?.id,
       name: nameSan.clean,
       payee: payeeSan.clean,
       amount: amt,
       date: when.toISOString(),
-      kind
+      kind,
+      bankName: chosenBank || undefined
     }
     if (mode === 'edit' && typeof onExpenseEdited === 'function') {
       onExpenseEdited(payload)
@@ -120,6 +147,8 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
       setExpenseAmount('')
       setPayee('')
       setExpenseDate('')
+      setBankChoice('')
+      setCustomBank('')
       setLoading(false)
     }
   }
@@ -183,6 +212,48 @@ const ExpenseForm = ({ categoryId, onExpenseAdded, onExpenseEdited, initialExpen
             required
             disabled={loading}
           />
+        </div>
+
+        {/* Payment Source (Bank) */}
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-black dark:text-white">Payment Source (Bank)</label>
+          <div className="grid grid-cols-[1fr,1fr] gap-2">
+            <select
+              value={bankChoice}
+              onChange={(e)=>setBankChoice(e.target.value)}
+              className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white"
+              disabled={loading}
+            >
+              <option value="">Select bank</option>
+              <option value="HDFC">HDFC</option>
+              <option value="SBI">SBI</option>
+              <option value="ICICI">ICICI</option>
+              <option value="Central">Central</option>
+              <option value="BOI">BOI</option>
+              <option value="BOB">BOB</option>
+              <option value="Other">Other…</option>
+            </select>
+            <input
+              type="text"
+              value={customBank}
+              onChange={(e)=>setCustomBank(e.target.value)}
+              className="px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white"
+              placeholder="Custom bank name"
+              disabled={loading || bankChoice !== 'Other'}
+            />
+          </div>
+          {/* Selected bank preview with icon */}
+          {(() => {
+            const chosen = bankChoice === 'Other' ? (customBank || '').trim() : bankChoice
+            const icon = bankIconSrc(chosen)
+            return chosen ? (
+              <div className="mt-1 flex items-center gap-1 text-[11px] text-black dark:text-white/80">
+            {icon ? (<img src={icon} alt={chosen} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
+                <span>{chosen}</span>
+              </div>
+            ) : null
+          })()}
+          <p className="text-xs text-gray-500 dark:text-white/60">This will be reflected near Remaining as per bank usage.</p>
         </div>
 
         <div className="space-y-2">
