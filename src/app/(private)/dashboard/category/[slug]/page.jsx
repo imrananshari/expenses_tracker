@@ -100,6 +100,8 @@ const CategoryPage = () => {
     const m = s.match(/\[Bank:\s*([^\]]+)\]/i)
     return m ? m[1].trim() : null
   }
+  const normalizeBankName = (name) => String(name || '').trim().toUpperCase()
+  const stripBankAndSplitTags = (note) => String(note || '').replace(/\s*\[Bank:[^\]]+\]\s*/ig,'').replace(/\s*\[Split:[^\]]+\]\s*/ig,'').trim()
   const bankSpentMap = useMemo(() => {
     const map = new Map()
     const all = [...(expensesBuying||[]), ...(expensesLabour||[])]
@@ -109,12 +111,14 @@ const CategoryPage = () => {
       const splits = parseTopupSplits(e.name)
       if (splits.length > 0) {
         splits.forEach(s => {
-          map.set(s.bank, (map.get(s.bank) || 0) + Number(s.amount || 0))
+          const key = normalizeBankName(s.bank)
+          map.set(key, (map.get(key) || 0) + Number(s.amount || 0))
         })
       } else {
         const tag = parseBankTag(e.name)
         if (!tag) return
-        map.set(tag, (map.get(tag) || 0) + Number(e.amount || 0))
+        const key = normalizeBankName(tag)
+        map.set(key, (map.get(key) || 0) + Number(e.amount || 0))
       }
     })
     return map
@@ -331,7 +335,8 @@ const CategoryPage = () => {
       ? ` [Split: ${expense.bankSplits.map(s => `${String(s.bank).trim()}=${Number(s.amount||0)}`).join(';')}]`
       : ''
     const bankTag = (!hasSplits && expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
-    const noteWithBank = `${expense.name}${splitTag || bankTag}`
+    const baseName = stripBankAndSplitTags(expense.name)
+    const noteWithBank = `${baseName}${splitTag || bankTag}`
     const { data, error } = await addExpense(user.id, { categoryId: category.id, budgetId, amount: expense.amount, note: noteWithBank, payee: expense.payee, kind: expense.kind, spentAt: expense.date })
     if (error) {
       console.error(error)
@@ -350,6 +355,20 @@ const CategoryPage = () => {
     try { addRecentExpense(data) } catch {}
     // Close modal on successful add
     setShowExpenseModal(false)
+
+    // Refresh expenses from API to ensure real-time totals and chips update
+    try {
+      const [ { data: buyRows }, { data: labRows } ] = await Promise.all([
+        listExpenses(user.id, category.id, 'buying'),
+        listExpenses(user.id, category.id, 'labour')
+      ])
+      const buyMapped2 = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited) }))
+      const labMapped2 = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited) }))
+      setExpensesBuying(buyMapped2)
+      setExpensesLabour(labMapped2)
+    } catch (e) {
+      console.warn('Failed to refresh expenses after add', e)
+    }
 
     // Frequent spending trigger after new expense
     const sevenDaysAgoTs = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -372,7 +391,8 @@ const CategoryPage = () => {
       ? ` [Split: ${expense.bankSplits.map(s => `${String(s.bank).trim()}=${Number(s.amount||0)}`).join(';')}]`
       : ''
     const bankTag = (!hasSplits && expense.bankName && String(expense.bankName).trim()) ? ` [Bank: ${String(expense.bankName).trim()}]` : ''
-    const noteWithBank = `${expense.name}${splitTag || bankTag}`
+    const baseName = stripBankAndSplitTags(expense.name)
+    const noteWithBank = `${baseName}${splitTag || bankTag}`
     const payload = {
       id: editingExpense.id,
       amount: expense.amount,
@@ -400,6 +420,20 @@ const CategoryPage = () => {
     // Edited flag now comes from API; no local storage tracking
     setEditingExpense(null)
     setShowExpenseModal(false)
+
+    // Refresh expenses from API to ensure real-time totals and chips update
+    try {
+      const [ { data: buyRows }, { data: labRows } ] = await Promise.all([
+        listExpenses(user.id, category.id, 'buying'),
+        listExpenses(user.id, category.id, 'labour')
+      ])
+      const buyMapped2 = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited) }))
+      const labMapped2 = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited) }))
+      setExpensesBuying(buyMapped2)
+      setExpensesLabour(labMapped2)
+    } catch (e) {
+      console.warn('Failed to refresh expenses after edit', e)
+    }
   }
 
   // Top-up budget modal and submission
@@ -486,6 +520,15 @@ const CategoryPage = () => {
           ...prev,
           { id: `topup-${tData.id}`, type: 'topup', title: 'Budget increased', message: `Added ₹${Number(tData.amount).toLocaleString()} • ${tData.note || 'Top-up'}`, categorySlug: category.slug, severity: 'info', date: tData.spent_at || new Date().toISOString() }
         ]))
+
+        // Refetch top-ups from API to ensure UI reflects server truth
+        try {
+          const { data: topRows } = await listExpenses(user.id, category.id, 'topup')
+          const topMapped2 = (topRows || []).map(e => ({ id: e.id, reason: e.note || 'Added amount', type: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'topup' }))
+          setTopups(topMapped2)
+        } catch (e) {
+          console.warn('Failed to refresh top-ups after add', e)
+        }
       }
       setShowTopupModal(false)
       setTopupForm({ amount: '', date: '', reason: '', type: '', bankChoice: '', customBank: '', hdfcAmt: '', sbiAmt: '', iciciAmt: '', otherAmt: '' })
@@ -708,7 +751,7 @@ const CategoryPage = () => {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {bankAllocations.map((a, idx) => {
-                      const used = bankSpentMap.get(String(a.bank)) || 0
+                      const used = bankSpentMap.get(normalizeBankName(a.bank)) || 0
                       const icon = a.image_url || bankIconSrc(a.bank)
                       return (
                         <span key={`${a.bank}-${idx}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 text-white text-[11px] ring-1 ring-white/20">
@@ -873,8 +916,8 @@ const CategoryPage = () => {
                     const bankName = bankMatch ? bankMatch[1].trim() : ''
                     const splits = parseTopupSplits(e.name)
                     const displayName = String(e.name || 'Expense')
-                      .replace(/\s*\[Bank:[^\]]+\]\s*/i,'')
-                      .replace(/\s*\[Split:[^\]]+\]\s*/i,'')
+                      .replace(/\s*\[Bank:[^\]]+\]\s*/ig,'')
+                      .replace(/\s*\[Split:[^\]]+\]\s*/ig,'')
                       .trim()
                     const bankIcon = bankIconSrc(bankName)
                     return (
@@ -971,8 +1014,8 @@ const CategoryPage = () => {
                     const bankName = bankMatch ? bankMatch[1].trim() : ''
                     const splits = parseTopupSplits(e.name)
                     const displayName = String(e.name || 'Expense')
-                      .replace(/\s*\[Bank:[^\]]+\]\s*/i,'')
-                      .replace(/\s*\[Split:[^\]]+\]\s*/i,'')
+                      .replace(/\s*\[Bank:[^\]]+\]\s*/ig,'')
+                      .replace(/\s*\[Split:[^\]]+\]\s*/ig,'')
                       .trim()
                     const bankIcon = bankIconSrc(bankName)
                     return (
