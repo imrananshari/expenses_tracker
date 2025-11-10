@@ -293,9 +293,11 @@ const CategoryPage = () => {
 
   const handleBudgetSet = async (payload) => {
     if (!category || !user) return
-    const amount = typeof payload === 'number' ? payload : Number(payload?.amount || 0)
+    const amountInput = typeof payload === 'number' ? payload : Number(payload?.amount || 0)
     const allocations = (typeof payload === 'object' && Array.isArray(payload.allocations)) ? payload.allocations : []
-    const { data, error } = await upsertBudget(user.id, category.id, amount, undefined, allocations)
+    const allocTotal = allocations.reduce((s,a)=> s + Number(a?.amount || 0), 0)
+    const amountToSave = allocations.length > 0 ? allocTotal : amountInput
+    const { data, error } = await upsertBudget(user.id, category.id, amountToSave, undefined, allocations)
     if (error) {
       console.error(error)
       toast.error(error.message)
@@ -318,6 +320,7 @@ const CategoryPage = () => {
           : [{ name: category.name, slug: category.slug, amount: data.amount }, ...list]
       })
     } catch {}
+    toast.success(`Budget updated to ₹${Number(data.amount||0).toLocaleString()} based on Payment Sources`)
   }
 
   const handleExpenseAdded = async (expense) => {

@@ -47,16 +47,13 @@ const BudgetForm = ({ categoryId, categoryName, onBudgetSet, initialAmount, init
       const cleanedAllocations = allocations
         .map(a => ({ bank: String(a.bank || '').trim(), amount: sanitizeAmount(a.amount) }))
         .filter(a => a.bank && !isNaN(a.amount) && a.amount > 0)
-
-      if (cleanedAllocations.length > 0 && cleanedAllocations.reduce((s,a)=>s+a.amount,0) > amount) {
-        toast.error('Allocated total exceeds budget amount')
-        setLoading(false)
-        return
-      }
+      const allocTotal = cleanedAllocations.reduce((s,a)=>s+a.amount,0)
+      // New behavior: when allocations are provided, budget will be set to their total
+      const amountToSave = cleanedAllocations.length > 0 ? allocTotal : amount
 
       // Pass structured payload upward; API wiring/migration will follow
-      onBudgetSet({ amount, allocations: cleanedAllocations })
-      toast.success(`Budget of ₹${amount.toLocaleString()} set for ${categoryName}`)
+      onBudgetSet({ amount: amountToSave, allocations: cleanedAllocations })
+      toast.success(`Budget of ₹${amountToSave.toLocaleString()} set for ${categoryName}`)
       setLoading(false)
     }, 500)
   }
@@ -120,6 +117,9 @@ const BudgetForm = ({ categoryId, categoryName, onBudgetSet, initialAmount, init
                 >×</button>
               </div>
             ))}
+          </div>
+          <div className="text-xs text-gray-500 dark:text-white/60">
+            Allocations total: ₹{allocations.reduce((s,a)=> s + Number(a.amount||0), 0).toLocaleString()} • On save, budget equals allocations total.
           </div>
           <div className="flex items-center justify-between">
             <button
