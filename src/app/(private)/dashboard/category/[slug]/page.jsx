@@ -677,10 +677,12 @@ const CategoryPage = () => {
   const filteredBuying = useMemo(() => applyFilters(expensesBuying, 'buying'), [expensesBuying, filters])
   const filteredLabour = useMemo(() => applyFilters(expensesLabour, 'labour'), [expensesLabour, filters])
 
-  // Reset visible counts when filters or data change
+  // Show all items by default; update when filters or data change
   useEffect(() => {
-    setVisibleCounts({ buying: 3, labour: 3 })
-  }, [filters, expensesBuying.length, expensesLabour.length])
+    const buyLen = applyFilters(expensesBuying, 'buying').length
+    const labLen = applyFilters(expensesLabour, 'labour').length
+    setVisibleCounts({ buying: buyLen, labour: labLen })
+  }, [filters, expensesBuying, expensesLabour])
 
   // Observe sentinels to load more
   useEffect(() => {
@@ -740,7 +742,7 @@ const CategoryPage = () => {
   return (
     <div className="max-w-md mx-auto min-h-screen flex flex-col">
       {/* Mobile header (12px rounded bottom with 3D shadow) */}
-      <div className="px-4 pt-6 pb-6 bg-brand-dark text-white rounded-b-xl shadow-2xl shadow-black/30">
+      <div className="relative px-4 pt-6 pb-6 bg-brand-dark text-white shadow-2xl shadow-black/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={handleBackToDashboard} aria-label="Back" className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold">←</button>
@@ -921,6 +923,10 @@ const CategoryPage = () => {
               )}
           </div>
         )}
+        {/* Animated footer stripe like dashboard topbar */}
+        <div className="pointer-events-none absolute left-0 right-0 bottom-0 h-3 overflow-hidden">
+          <div className="w-full h-full bg-diagonal-pattern opacity-60 animate-pattern" />
+        </div>
       </div>
 
       
@@ -974,9 +980,10 @@ const CategoryPage = () => {
               {/* Buying list styled like Recent Expenses */}
               <TabsContent value="buying" className="mt-4 space-y-4">
               <div className="p-4 bg-white dark:bg-zinc-800 rounded-xl shadow">
-                {/* Title on its own line at top-left */}
-                <div className="mb-2">
+                {/* Title + count */}
+                <div className="mb-2 flex items-center justify-between">
                   <h3 className="font-semibold">Buying Expenses</h3>
+                  <span className="text-xs text-gray-500">{filteredBuying.length} items</span>
                 </div>
                 {/* Controls in one row: search, date filter, PDF */}
                 <div className="relative flex items-center mb-3 gap-2">
@@ -1063,9 +1070,7 @@ const CategoryPage = () => {
                   {filteredBuying.length === 0 && (
                     <div className="text-sm text-gray-500">No buying expenses</div>
                   )}
-                  {filteredBuying.length > visibleCounts.buying && (
-                    <div ref={buyingSentinelRef} data-id="buying" aria-hidden="true" className="h-2 opacity-0" />
-                  )}
+                  {/* Sentinel removed since we show all items by default */}
                 </div>
               </div>
               </TabsContent>
@@ -1076,6 +1081,7 @@ const CategoryPage = () => {
               <div className="p-4 bg-white dark:bg-zinc-800 rounded-xl shadow">
                 <div className="relative flex items-center mb-3 gap-2">
                   <h3 className="font-semibold">Labour Expenses</h3>
+                  <span className="ml-2 text-xs text-gray-500">{filteredLabour.length} items</span>
                   <div className="flex-1 flex justify-center">
                     <div className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-700 rounded-md px-3 py-1 w-full max-w-xs">
                       <Search className="w-4 h-4" />
@@ -1161,9 +1167,7 @@ const CategoryPage = () => {
                   {filteredLabour.length === 0 && (
                     <div className="text-sm text-gray-500">No labour expenses</div>
                   )}
-                  {filteredLabour.length > visibleCounts.labour && (
-                    <div ref={labourSentinelRef} data-id="labour" aria-hidden="true" className="h-2 opacity-0" />
-                  )}
+                  {/* Sentinel removed since we show all items by default */}
                 </div>
               </div>
               </TabsContent>
