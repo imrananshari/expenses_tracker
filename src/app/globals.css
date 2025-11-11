@@ -43,6 +43,16 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* Remove number input spinner arrows across browsers */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield; /* Firefox */
+}
+
 /* Global button cursor behavior */
 @layer base {
   button { cursor: pointer; }

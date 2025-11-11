@@ -62,10 +62,12 @@ const CategoryPage = () => {
 
   // Derived totals for budget alert in the top bar
   const isHomeBuilding = (category?.name || '').toLowerCase().includes('home')
-  // Restrict totals to current month so Remaining reflects this month’s budget
-  const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  // Budget period (defaults to current month until budget loads)
+  const [periodDate, setPeriodDate] = useState(null)
+  const activePeriod = periodDate ? new Date(periodDate) : new Date()
+  // Restrict totals to the active budget period
+  const monthStart = new Date(activePeriod.getFullYear(), activePeriod.getMonth(), 1)
+  const monthEnd = new Date(activePeriod.getFullYear(), activePeriod.getMonth() + 1, 1)
   const sumThisMonth = (items) => (items || []).reduce((sum, e) => {
     const d = e?.date ? new Date(e.date) : null
     if (d && d >= monthStart && d < monthEnd) {
@@ -107,7 +109,9 @@ const CategoryPage = () => {
     const all = [...(expensesBuying||[]), ...(expensesLabour||[])]
     all.forEach(e => {
       const d = e?.date ? new Date(e.date) : null
-      if (!d || d < monthStart || d >= monthEnd) return
+      const inPeriod = d && d >= monthStart && d < monthEnd
+      const matchesBudget = e?.budgetId && budgetId && String(e.budgetId) === String(budgetId)
+      if (!inPeriod && !matchesBudget) return
       const splits = parseTopupSplits(e.name)
       if (splits.length > 0) {
         splits.forEach(s => {
@@ -122,7 +126,7 @@ const CategoryPage = () => {
       }
     })
     return map
-  }, [expensesBuying, expensesLabour, monthStart.getTime(), monthEnd.getTime()])
+  }, [expensesBuying, expensesLabour, monthStart.getTime(), monthEnd.getTime(), budgetId])
 
   // Parse split banks from a note format: "... [Split: HDFC=2000;SBI=1500;ICICI=1000;Custom=500]"
   function parseTopupSplits(note) {
@@ -173,6 +177,8 @@ const CategoryPage = () => {
         if (budgetRow) {
           setBudget(budgetRow.amount)
           setBudgetId(budgetRow.id)
+          // Align UI period to the budget’s month
+          setPeriodDate(budgetRow.sourcePeriod || budgetRow.period)
           setShowBudgetForm(false)
           if (Array.isArray(budgetRow.allocations)) {
             setBankAllocations(budgetRow.allocations.map(a => ({ bank: a.bank, amount: a.amount, source_id: a.source_id })))
@@ -192,8 +198,8 @@ const CategoryPage = () => {
           listExpenses(user.id, cat.id, 'labour'),
           listExpenses(user.id, cat.id, 'topup')
         ])
-        const buyMapped = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited) }))
-        const labMapped = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited) }))
+        const buyMapped = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited), budgetId: e.budget_id }))
+        const labMapped = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited), budgetId: e.budget_id }))
         const topMapped = (topupRows || []).map(e => ({ id: e.id, reason: e.note || 'Added amount', type: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'topup' }))
         setExpensesBuying(buyMapped)
         setExpensesLabour(labMapped)
@@ -343,7 +349,7 @@ const CategoryPage = () => {
       toast.error(error.message)
       return
     }
-    const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited) }
+    const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited), budgetId: data.budget_id }
     if (mapped.kind === 'labour') {
       setExpensesLabour([mapped, ...expensesLabour])
       setCategoryData(slug, { expensesLabour: [mapped, ...(expensesLabour || [])] })
@@ -362,8 +368,8 @@ const CategoryPage = () => {
         listExpenses(user.id, category.id, 'buying'),
         listExpenses(user.id, category.id, 'labour')
       ])
-      const buyMapped2 = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited) }))
-      const labMapped2 = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited) }))
+      const buyMapped2 = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited), budgetId: e.budget_id }))
+      const labMapped2 = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited), budgetId: e.budget_id }))
       setExpensesBuying(buyMapped2)
       setExpensesLabour(labMapped2)
     } catch (e) {
@@ -407,7 +413,7 @@ const CategoryPage = () => {
       toast.error(error.message)
       return
     }
-    const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited) }
+    const mapped = { id: data.id, name: data.note || 'Expense', payee: data.payee || null, amount: data.amount, date: data.spent_at, kind: data.kind, edited: Boolean(data.edited), budgetId: data.budget_id }
     if (mapped.kind === 'labour') {
       setExpensesLabour(prev => prev.map(e => e.id === mapped.id ? { ...mapped, edited: true } : e))
       setCategoryData(slug, { expensesLabour: (expensesLabour || []).map(e => e.id === mapped.id ? { ...mapped, edited: true } : e) })
@@ -427,8 +433,8 @@ const CategoryPage = () => {
         listExpenses(user.id, category.id, 'buying'),
         listExpenses(user.id, category.id, 'labour')
       ])
-      const buyMapped2 = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited) }))
-      const labMapped2 = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited) }))
+      const buyMapped2 = (buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'buying', edited: Boolean(e.edited), budgetId: e.budget_id }))
+      const labMapped2 = (labRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: e.amount, date: e.spent_at, kind: 'labour', edited: Boolean(e.edited), budgetId: e.budget_id }))
       setExpensesBuying(buyMapped2)
       setExpensesLabour(labMapped2)
     } catch (e) {
@@ -487,6 +493,8 @@ const CategoryPage = () => {
       }
       setBudget(bData.amount)
       setBudgetId(bData.id)
+      // Update active period to server’s normalized period
+      setPeriodDate(bData.period)
       // Merge returned allocations into local state
       const returnedAllocs = Array.isArray(bData?.allocations) ? bData.allocations.map(a => ({ bank: a.bank, amount: a.amount, source_id: a.source_id })) : []
       const mergedMap = new Map((bankAllocations || []).map(a => [String(a.bank), { bank: a.bank, amount: Number(a.amount||0), source_id: a.source_id }]))

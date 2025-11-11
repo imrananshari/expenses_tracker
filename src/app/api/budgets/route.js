@@ -12,21 +12,24 @@ function getAdmin() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 }
 
+function toISODateString(y, m, d = 1) {
+  const mm = String(m).padStart(2, '0')
+  const dd = String(d).padStart(2, '0')
+  return `${y}-${mm}-${dd}`
+}
+
 function normalizeMonthStart(dateStr) {
-  if (!dateStr) {
-    const d = new Date()
-    const s = new Date(d.getFullYear(), d.getMonth(), 1)
-    return s.toISOString().slice(0, 10)
-  }
-  const d = new Date(dateStr)
-  const s = new Date(d.getFullYear(), d.getMonth(), 1)
-  return s.toISOString().slice(0, 10)
+  const d = dateStr ? new Date(dateStr) : new Date()
+  // Use local year/month directly to avoid timezone shifting when converting to UTC
+  return toISODateString(d.getFullYear(), d.getMonth() + 1, 1)
 }
 
 function nextMonthStartISO(period) {
   const d = period ? new Date(period) : new Date()
-  const end = new Date(d.getFullYear(), d.getMonth() + 1, 1)
-  return end.toISOString().slice(0, 10)
+  let y = d.getFullYear()
+  let m = d.getMonth() + 2 // next month in 1..12
+  if (m > 12) { y += 1; m = 1 }
+  return toISODateString(y, m, 1)
 }
 
 export async function GET(req) {
@@ -146,6 +149,7 @@ export async function POST(req) {
     const amount = Number(body?.amount || 0)
     const period = normalizeMonthStart(body?.period)
     const allocations = Array.isArray(body?.allocations) ? body.allocations : [] // [{bank, amount}] or [{source_id, amount}]
+    const syncAllocations = Object.prototype.hasOwnProperty.call(body || {}, 'allocations')
     if (!userId || !categoryId) {
       return NextResponse.json({ error: 'Missing userId or categoryId' }, { status: 400 })
     }
@@ -170,7 +174,7 @@ export async function POST(req) {
         .single()
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
       // Upsert allocations if provided
-      const response = await upsertAllocations(admin, { userId, budgetId: existing.id, allocations })
+      const response = await upsertAllocations(admin, { userId, budgetId: existing.id, allocations, sync: syncAllocations })
       if (response.error) return NextResponse.json({ error: response.error }, { status: 400 })
       return NextResponse.json({ ...data, allocations: response.allocations }, { status: 200 })
     } else {
@@ -180,7 +184,7 @@ export async function POST(req) {
         .select('id, user_id, category_id, period, amount')
         .single()
       if (error) return NextResponse.json({ error: error.message }, { status: 400 })
-      const response = await upsertAllocations(admin, { userId, budgetId: data.id, allocations })
+      const response = await upsertAllocations(admin, { userId, budgetId: data.id, allocations, sync: syncAllocations })
       if (response.error) return NextResponse.json({ error: response.error }, { status: 400 })
       return NextResponse.json({ ...data, allocations: response.allocations }, { status: 200 })
     }
@@ -190,8 +194,9 @@ export async function POST(req) {
 }
 
 // Helper: create sources if needed and upsert allocations
-async function upsertAllocations(admin, { userId, budgetId, allocations }) {
-  if (!Array.isArray(allocations) || allocations.length === 0) {
+async function upsertAllocations(admin, { userId, budgetId, allocations, sync = false }) {
+  const provided = Array.isArray(allocations)
+  if (!provided) {
     return { allocations: [], error: null }
   }
   try {
@@ -204,7 +209,16 @@ async function upsertAllocations(admin, { userId, budgetId, allocations }) {
       }))
       .filter(a => (a.source_id || a.bank) && !isNaN(a.amount) && a.amount > 0)
 
-    if (normalized.length === 0) return { allocations: [], error: null }
+    // If syncing and user cleared allocations, delete all existing for this budget
+    if (sync && normalized.length === 0) {
+      const { error: delErr } = await admin
+        .from('budget_allocations')
+        .delete()
+        .eq('user_id', userId)
+        .eq('budget_id', budgetId)
+      if (delErr) return { allocations: [], error: delErr.message }
+      return { allocations: [], error: null }
+    }
 
     // Resolve or create source_ids when only bank names are provided
     const resolved = []
@@ -269,6 +283,27 @@ async function upsertAllocations(admin, { userId, budgetId, allocations }) {
           .single()
         if (insErr) return { allocations: [], error: insErr.message }
         results.push({ ...r, amount: inserted.amount })
+      }
+    }
+
+    // Synchronize: delete any allocations not present in the payload
+    if (sync) {
+      const keep = new Set(resolved.map(r => r.source_id))
+      const { data: existingRows, error: listErr } = await admin
+        .from('budget_allocations')
+        .select('id, source_id')
+        .eq('user_id', userId)
+        .eq('budget_id', budgetId)
+      if (listErr) return { allocations: results, error: listErr.message }
+      const toDeleteIds = (existingRows || [])
+        .filter(row => !keep.has(row.source_id))
+        .map(row => row.id)
+      if (toDeleteIds.length) {
+        const { error: delErr } = await admin
+          .from('budget_allocations')
+          .delete()
+          .in('id', toDeleteIds)
+        if (delErr) return { allocations: results, error: delErr.message }
       }
     }
 
