@@ -609,7 +609,11 @@ import { useDashboardData } from '@/hooks/useDashboardData'
               const catName = catItem?.name || 'Category'
               const CatIcon = getCategoryIcon(catName)
               const bankName = parseBankTag(r.note)
-              const displayName = String(r.note || 'Expense').replace(/\s*\[Bank:[^\]]+\]\s*/i,'').trim()
+              const splits = parseTopupSplits(r.note)
+              const displayName = String(r.note || 'Expense')
+                .replace(/\s*\[Bank:[^\]]+\]\s*/ig,'')
+                .replace(/\s*\[Split:[^\]]+\]\s*/ig,'')
+                .trim()
               const bankIcon = bankIconSrc(bankName)
               return (
                 <div key={r.id} className="group flex items-center justify-between py-2">
@@ -620,7 +624,22 @@ import { useDashboardData } from '@/hooks/useDashboardData'
                     <div className="leading-tight">
                       <div className="text-sm font-medium flex items-center gap-1">
                         <span>{displayName || 'Expense'}</span>
-                        {bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null}
+                        {splits.length > 0 ? (
+                          <span className="ml-1 flex flex-wrap items-center gap-1">
+                            {splits.map((s, sIdx) => (
+                              <span key={`r-split-${r.id}-${sIdx}`} className="inline-flex items-center gap-1 px-1.5 py-[1px] rounded-md bg-white/10 text-white text-[10px] ring-1 ring-white/20">
+                                {bankIconSrc(s.bank) ? (
+                                  <img src={bankIconSrc(s.bank)} alt={s.bank} className="h-4 w-auto" style={{ objectFit: 'contain', maxWidth: '18px' }} />
+                                ) : (
+                                  <span className="font-medium">{s.bank}</span>
+                                )}
+                                <span className="opacity-90" style={{ color: '#1f2937' }}>₹{Number(s.amount).toLocaleString()}</span>
+                              </span>
+                            ))}
+                          </span>
+                        ) : (
+                          bankIcon ? (<img src={bankIcon} alt={bankName} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />) : null
+                        )}
                         {r.edited && (<span className="ml-2 px-1.5 py-[1px] rounded bg-yellow-100 text-yellow-700 dark:bg-yellow-700/20 dark:text-yellow-200 text-[10px]">edited</span>)}
                       </div>
                       <div className="text-[11px] text-black">{catName}{r.payee ? ` • ${r.payee}` : ''}</div>
@@ -667,4 +686,22 @@ export default Dashboard
     const s = String(note || '')
     const m = s.match(/\[Bank:\s*([^\]]+)\]/i)
     return m ? m[1].trim() : ''
+  }
+
+  // Parse split banks from a note format: "... [Split: HDFC=2000;SBI=1500]"
+  const parseTopupSplits = (note) => {
+    const s = String(note || '')
+    const m = s.match(/\[Split:\s*([^\]]+)\]/i)
+    if (!m) return []
+    const body = m[1]
+    return body
+      .split(';')
+      .map(tok => tok.trim())
+      .filter(Boolean)
+      .map(tok => {
+        const [bank, amtStr] = tok.split('=')
+        const amt = Number(amtStr || 0)
+        return { bank: (bank || '').trim(), amount: isNaN(amt) ? 0 : amt }
+      })
+      .filter(x => x.bank && x.amount > 0)
   }

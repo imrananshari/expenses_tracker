@@ -14,7 +14,7 @@ import ExpenseForm from '@/app/components/budget/ExpenseForm'
 import MiniSpendChart from '@/app/components/budget/MiniSpendChart'
 import { useDashboardData } from '@/hooks/useDashboardData'
 // Mobile redesign uses custom list rows instead of table summary
-import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, IndianRupee, FileDown } from 'lucide-react'
+import { Bell, LogOut, Home as HomeIcon, ShoppingCart, CreditCard, User, MoreHorizontal, Plus, X, Search, Calendar, AlertCircle, AlertTriangle, PlusCircle, Pencil, IndianRupee, FileDown, Eye } from 'lucide-react'
 import { exportExpensesPdf } from '@/lib/pdf'
 
 const CategoryPage = () => {
@@ -55,6 +55,11 @@ const CategoryPage = () => {
   // Track which tab is selected in the category page
   const [activeTab, setActiveTab] = useState('buying')
   const [datePopoverOpen, setDatePopoverOpen] = useState({ buying: false, labour: false })
+  // Bank details modal state
+  const [bankModalOpen, setBankModalOpen] = useState(false)
+  const [selectedBank, setSelectedBank] = useState(null)
+  const openBankModal = (bankName) => { setSelectedBank(bankName); setBankModalOpen(true) }
+  const closeBankModal = () => setBankModalOpen(false)
 
   // Loader visibility with minimum display time
   const [overlayVisible, setOverlayVisible] = useState(true)
@@ -127,6 +132,41 @@ const CategoryPage = () => {
     })
     return map
   }, [expensesBuying, expensesLabour, monthStart.getTime(), monthEnd.getTime(), budgetId])
+
+  // Build expense list for the selected bank for modal view
+  const bankExpenseList = useMemo(() => {
+    if (!selectedBank) return []
+    const key = normalizeBankName(selectedBank)
+    const out = []
+    const all = [...(expensesBuying||[]), ...(expensesLabour||[])]
+    all.forEach(e => {
+      const d = e?.date ? new Date(e.date) : null
+      const inPeriod = d && d >= monthStart && d < monthEnd
+      const matchesBudget = e?.budgetId && budgetId && String(e.budgetId) === String(budgetId)
+      if (!inPeriod && !matchesBudget) return
+      const splits = parseTopupSplits(e.name)
+      if (splits.length > 0) {
+        const m = splits.find(s => normalizeBankName(s.bank) === key)
+        if (m) out.push({ id: e.id, name: e.name, amount: Number(m.amount||0), date: e.date })
+      } else {
+        const tag = parseBankTag(e.name)
+        if (tag && normalizeBankName(tag) === key) {
+          out.push({ id: e.id, name: e.name, amount: Number(e.amount||0), date: e.date })
+        }
+      }
+    })
+    return out
+  }, [selectedBank, expensesBuying, expensesLabour, monthStart.getTime(), monthEnd.getTime(), budgetId])
+
+  const bankExpenseTotal = useMemo(() => bankExpenseList.reduce((sum, e) => sum + Number(e.amount||0), 0), [bankExpenseList])
+
+  // Used amount derived from payment sources (sum of per-bank used)
+  const usedFromBanks = useMemo(() => {
+    if (!Array.isArray(bankAllocations) || bankAllocations.length === 0) return 0
+    return bankAllocations.reduce((sum, a) => sum + (bankSpentMap.get(normalizeBankName(a.bank)) || 0), 0)
+  }, [bankAllocations, bankSpentMap])
+  const remainingBank = Math.max(0, Number(budget || 0) - usedFromBanks)
+  const overspentBank = Math.max(0, usedFromBanks - Number(budget || 0))
 
   // Parse split banks from a note format: "... [Split: HDFC=2000;SBI=1500;ICICI=1000;Custom=500]"
   function parseTopupSplits(note) {
@@ -762,7 +802,8 @@ const CategoryPage = () => {
                       const used = bankSpentMap.get(normalizeBankName(a.bank)) || 0
                       const icon = a.image_url || bankIconSrc(a.bank)
                       return (
-                        <span key={`${a.bank}-${idx}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 text-white text-[11px] ring-1 ring-white/20">
+                        <button type="button" onClick={() => openBankModal(a.bank)} key={`${a.bank}-${idx}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-[11px] ring-1 ring-white/20">
+                          <Eye className="w-3 h-3 opacity-80" />
                           {icon ? (
             <img src={icon} alt={a.bank || 'Bank'} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />
                           ) : (
@@ -770,7 +811,7 @@ const CategoryPage = () => {
                           )}
                           <span className="opacity-80">• Used ₹{Number(used).toLocaleString()}</span>
                           <span className="opacity-60">/ ₹{Number(a.amount || 0).toLocaleString()}</span>
-                        </span>
+                        </button>
                       )
                     })}
                   </div>
@@ -779,25 +820,71 @@ const CategoryPage = () => {
             </div>
 
             {/* Alert strip */}
-            {overspent > 0 ? (
-              <div className="mt-3 p-3 rounded-xl bg-red-600/20 border border-red-500/40 text-red-100">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm">Overspent</div>
-                  <div className="font-extrabold text-2xl">₹{overspent.toLocaleString()}</div>
+            <div className="mt-3 flex items-stretch gap-2">
+              {overspentBank > 0 ? (
+                <div className="p-2 rounded-xl bg-red-600/20 border border-red-500/40 text-red-100 flex-1 flex items-center min-h-[56px]">
+                  <div className="flex w-full items-center justify-between">
+                    <div className="text-xs">Overspent</div>
+                    <div className="font-medium text-sm">₹{overspentBank.toLocaleString()}</div>
+                  </div>
                 </div>
-                <div className="mt-1 text-xs opacity-80">Mostly on <span className="font-semibold">{dominantKind}</span> (₹{dominantAmount.toLocaleString()})</div>
-              </div>
-            ) : (
-              <div className="mt-3 p-3 rounded-xl bg-green-600/20 border border-green-500/40 text-green-100">
+              ) : (
+                <div className="p-2 rounded-xl bg-green-600/20 border border-green-500/40 text-green-100 flex-1 flex items-center min-h-[56px]">
+                  <div className="flex w-full items-center justify-between">
+                    <div className="text-xs">Remaining</div>
+                    <div className="font-semibold text-base">₹{remainingBank.toLocaleString()}</div>
+                  </div>
+                </div>
+              )}
+              <div className="p-2 rounded-xl bg-white/10 backdrop-blur-sm border border-white/20 text-white ring-1 ring-white/20 flex-1 min-h-[56px]">
                 <div className="flex items-center justify-between">
-                  <div className="text-sm">Remaining</div>
-                  <div className="font-extrabold text-xl">₹{remaining.toLocaleString()}</div>
+                  <div className="text-xs">Used</div>
+                  <div className="font-bold text-lg text-amount">₹{usedFromBanks.toLocaleString()}</div>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-[11px]">
+                  <div className="opacity-80">Total Budget</div>
+                  <div className="font-bold text-lg text-amount">₹{Number(budget || 0).toLocaleString()}</div>
                 </div>
               </div>
-            )}
+            </div>
 
             {/* Mini bar chart below alert */}
             <MiniSpendChart buyingExpenses={expensesBuying} labourExpenses={isHomeBuilding ? expensesLabour : []} buyingLabel={buyingLabel} labourLabel={labourLabel} />
+
+            {/* Bank detail modal */}
+            {bankModalOpen && selectedBank && (
+              <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center">
+                <div className="w-[520px] max-w-[92vw] max-h-[70vh] overflow-y-auto rounded-xl bg-brand-dark text-white ring-1 ring-white/20 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      {bankIconSrc(selectedBank) ? (
+            <img src={bankIconSrc(selectedBank)} alt={selectedBank} className="h-7 w-auto" style={{ objectFit: 'contain', maxWidth: '28px' }} />
+                      ) : (
+                        <span className="font-medium">{selectedBank}</span>
+                      )}
+                      <span className="text-xs opacity-80">Details</span>
+                    </div>
+                    <button type="button" onClick={closeBankModal} aria-label="Close" className="p-1 rounded-md hover:bg-white/10"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs opacity-80">Total Used</div>
+                    <div className="font-bold text-lg text-amount">₹{bankExpenseTotal.toLocaleString()}</div>
+                  </div>
+                  <div className="space-y-2">
+                    {bankExpenseList.length === 0 ? (
+                      <div className="text-xs opacity-70">No expenses from this source in current period.</div>
+                    ) : (
+                      bankExpenseList.map(e => (
+                        <div key={e.id} className="flex items-center justify-between text-xs">
+                          <div className="truncate">{stripBankAndSplitTags(e.name)}</div>
+                          <div className="font-medium text-amount">₹{Number(e.amount).toLocaleString()}</div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Small list of recent budget additions */}
             {topups.length > 0 && (
@@ -820,7 +907,7 @@ const CategoryPage = () => {
                                   ) : (
                                     <span className="font-medium">{s.bank}</span>
                                   )}
-                                  <span className="opacity-70">₹{Number(s.amount).toLocaleString()}</span>
+                                  <span className="opacity-90" style={{ color: '#1f2937' }}>₹{Number(s.amount).toLocaleString()}</span>
                                 </span>
                               ))}
                             </div>
@@ -946,7 +1033,7 @@ const CategoryPage = () => {
                 ) : (
                   <span className="font-medium">{s.bank}</span>
                 )}
-                <span className="opacity-70">₹{Number(s.amount).toLocaleString()}</span>
+                <span className="opacity-90" style={{ color: '#1f2937' }}>₹{Number(s.amount).toLocaleString()}</span>
               </span>
             ))}
           </span>
@@ -1044,7 +1131,7 @@ const CategoryPage = () => {
                 ) : (
                   <span className="font-medium">{s.bank}</span>
                 )}
-                <span className="opacity-70">₹{Number(s.amount).toLocaleString()}</span>
+                <span className="opacity-90" style={{ color: '#1f2937' }}>₹{Number(s.amount).toLocaleString()}</span>
               </span>
             ))}
           </span>
