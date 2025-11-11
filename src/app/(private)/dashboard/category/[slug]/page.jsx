@@ -802,17 +802,27 @@ const CategoryPage = () => {
                   <div className="flex flex-wrap gap-2">
                     {bankAllocations.map((a, idx) => {
                       const used = bankSpentMap.get(normalizeBankName(a.bank)) || 0
+                      const total = Number(a.amount || 0)
+                      const remaining = Math.max(0, total - used)
                       const icon = a.image_url || bankIconSrc(a.bank)
                       return (
-                        <button type="button" onClick={() => openBankModal(a.bank)} key={`${a.bank}-${idx}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-[11px] ring-1 ring-white/20">
-                          <Eye className="w-3 h-3 opacity-80" />
-                          {icon ? (
-            <img src={icon} alt={a.bank || 'Bank'} className="h-6 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />
-                          ) : (
-                            <span className="font-medium">{a.bank || 'Bank'}</span>
-                          )}
-                          <span className="opacity-80">• Used ₹{Number(used).toLocaleString()}</span>
-                          <span className="opacity-60">/ ₹{Number(a.amount || 0).toLocaleString()}</span>
+                        <button
+                          type="button"
+                          onClick={() => openBankModal(a.bank)}
+                          key={`${a.bank}-${idx}`}
+                          className="inline-flex flex-col items-start gap-0.5 px-2 py-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white text-[11px] ring-1 ring-white/20"
+                        >
+                          <div className="flex items-center gap-1">
+                            <Eye className="w-3 h-3 opacity-80" />
+                            {icon ? (
+              <img src={icon} alt={a.bank || 'Bank'} className="h-5 w-auto" style={{ objectFit: 'contain', maxWidth: '24px' }} />
+                            ) : (
+                              <span className="font-medium">{a.bank || 'Bank'}</span>
+                            )}
+                            <span className="opacity-80">• Used ₹{Number(used).toLocaleString()}</span>
+                            <span className="opacity-60">/ ₹{Number(total).toLocaleString()}</span>
+                          </div>
+                          <div className="text-[10px] opacity-80">Remaining ₹{Number(remaining).toLocaleString()}</div>
                         </button>
                       )
                     })}
