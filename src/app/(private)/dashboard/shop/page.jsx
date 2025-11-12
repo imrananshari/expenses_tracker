@@ -154,6 +154,12 @@ const CategoryIcon = useMemo(() => getCategoryIcon(selectedCategoryName), [selec
     return list
   }, [selectedBank, expensesBuying, expensesSales])
   const bankExpenseTotal = useMemo(() => bankExpenseList.reduce((s,e)=>s+Number(e.amount||0),0), [bankExpenseList])
+  // Sum of used amount across all split/tagged banks (for summary card)
+  const usedFromBanks = useMemo(() => {
+    let total = 0
+    bankSpentMap.forEach(v => { total += Number(v || 0) })
+    return total
+  }, [bankSpentMap])
 
   useEffect(() => {
     let cancelled = false
@@ -567,21 +573,33 @@ const CategoryIcon = useMemo(() => getCategoryIcon(selectedCategoryName), [selec
             </div>
           </div>
 
-          {overspent > 0 ? (
-            <div className="mt-3 p-3 rounded-xl bg-red-600/20 border border-red-500/40 text-red-100">
+          <div className="mt-3 flex items-stretch gap-2">
+            {overspent > 0 ? (
+              <div className="p-2 rounded-xl bg-red-600/20 border border-red-500/40 text-red-100 flex-1 flex items-center min-h-[56px]">
+                <div className="flex w-full items-center justify-between">
+                  <div className="text-xs">Overspent</div>
+                  <div className="font-extrabold text-sm">₹{overspent.toLocaleString()}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-2 rounded-xl bg-green-600/20 border border-green-500/40 text-green-100 flex-1 flex items-center min-h-[56px]">
+                <div className="flex w-full items-center justify-between">
+                  <div className="text-xs">Remaining</div>
+                  <div className="font-extrabold text-base">₹{remaining.toLocaleString()}</div>
+                </div>
+              </div>
+            )}
+            <div className="p-2 rounded-xl bg-white/10 backdrop-blur-sm border border-white/20 text-white ring-1 ring-white/20 flex-1 min-h-[56px]">
               <div className="flex items-center justify-between">
-                <div className="text-sm">Overspent</div>
-                <div className="font-extrabold text-2xl">₹{overspent.toLocaleString()}</div>
+                <div className="text-xs">Used</div>
+                <div className="font-bold text-lg text-amount">₹{Number(usedFromBanks).toLocaleString()}</div>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-[11px]">
+                <div className="opacity-80">Total Budget</div>
+                <div className="font-bold text-lg text-amount">₹{Number(budgetInfo.amount || 0).toLocaleString()}</div>
               </div>
             </div>
-          ) : (
-            <div className="mt-3 p-3 rounded-xl bg-green-600/20 border border-green-500/40 text-green-100">
-              <div className="flex items-center justify-between">
-                <div className="text-sm">Remaining</div>
-                <div className="font-extrabold text-xl">₹{remaining.toLocaleString()}</div>
-              </div>
-            </div>
-          )}
+          </div>
 
           <MiniSpendChart buyingExpenses={expensesBuying} labourExpenses={expensesSales} />
 
