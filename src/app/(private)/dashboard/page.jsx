@@ -376,7 +376,7 @@ import { useDashboardData } from '@/hooks/useDashboardData'
               </div>
             )}
             <div>
-              <img src="/budgzyx.svg" alt="Budgzyx" className="h-28  " />
+              <img src="/bwhite.png" alt="Budgzyx" className="h-28  " />
               {/* <p className="text-base font-semibold capitalize">{displayName}</p> */}
             </div>
           </div>
