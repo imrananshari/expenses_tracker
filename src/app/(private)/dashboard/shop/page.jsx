@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { getUserCategories, getBudgetForMonth, getBudgetsForMonthBulk, listRecentExpenses, upsertBudget, listExpenses, addExpense, addCategory, updateExpense } from '@/api/db'
-import { IndianRupee, ShoppingCart, Calendar, Plus, Bell, LogOut, Search, Shirt, Store, Car, Wrench, Utensils, UtensilsCrossed, FileDown } from 'lucide-react'
+import { IndianRupee, ShoppingCart, Calendar, Plus, Bell, LogOut, Search, Shirt, Store, Car, Wrench, Utensils, UtensilsCrossed, FileDown, Eye } from 'lucide-react'
 import { exportExpensesPdf } from '@/lib/pdf'
 import MiniSpendChart from '@/app/components/budget/MiniSpendChart'
 import ExpenseForm from '@/app/components/budget/ExpenseForm'
@@ -20,6 +20,7 @@ const ShopPage = () => {
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
   const [selectedCategoryName, setSelectedCategoryName] = useState('')
   const [budgetInfo, setBudgetInfo] = useState({ amount: 0, id: null })
+  const [bankAllocations, setBankAllocations] = useState([])
   const [expensesBuying, setExpensesBuying] = useState([])
   const [expensesSales, setExpensesSales] = useState([])
   const [topups, setTopups] = useState([])
@@ -35,6 +36,9 @@ const ShopPage = () => {
   const [setupTemplateName, setSetupTemplateName] = useState('')
   const [setupNewName, setSetupNewName] = useState('')
   const [setupBudgetAmount, setSetupBudgetAmount] = useState('')
+  const [setupAllocations, setSetupAllocations] = useState([
+    { bank: '', amount: '', other: '' },
+  ])
   const SHOP_TEMPLATES = [
     'Cloths Garments',
     'Grocery',
@@ -75,7 +79,81 @@ const ShopPage = () => {
     if (n.includes('food')) return Utensils
     return ShoppingCart
   }
-  const CategoryIcon = useMemo(() => getCategoryIcon(selectedCategoryName), [selectedCategoryName])
+const CategoryIcon = useMemo(() => getCategoryIcon(selectedCategoryName), [selectedCategoryName])
+  // Setup modal validation helpers (must be inside component scope)
+  const setupBudgetNum = useMemo(() => Number(setupBudgetAmount || 0), [setupBudgetAmount])
+  const setupAllocSum = useMemo(() => (setupAllocations || []).reduce((s,a)=> s + Number(a.amount||0), 0), [setupAllocations])
+  const overBudget = useMemo(() => setupBudgetNum > 0 && setupAllocSum > setupBudgetNum, [setupAllocSum, setupBudgetNum])
+  const underBudget = useMemo(() => setupBudgetNum > 0 && setupAllocSum < setupBudgetNum, [setupAllocSum, setupBudgetNum])
+
+  // Helpers to parse bank/split tags and icons
+  const stripBankAndSplitTags = (note) => String(note||'').replace(/\s*\[Split:[^\]]+\]\s*/ig,'').replace(/\s*\[Bank:[^\]]+\]\s*/ig,'').trim()
+  const normalizeBankName = (name) => String(name||'').trim().toLowerCase()
+  const bankIconSrc = (bank) => {
+    const n = normalizeBankName(bank)
+    if (n.includes('hdfc')) return '/banks/hdfc.png'
+    if (n.includes('sbi')) return '/banks/sbi.png'
+    if (n.includes('icici')) return '/banks/icici.png'
+    if (n.includes('bank of baroda') || n.includes('bob')) return '/banks/bob.png'
+    if (n.includes('bank of india') || n.includes('boi')) return '/banks/boi.png'
+    if (n.includes('central')) return '/banks/central.png'
+    return null
+  }
+  function parseTopupSplits(note) {
+    const m = String(note||'').match(/\[Split:([^\]]+)\]/i)
+    if (!m) return []
+    return m[1].split(';').map(s => {
+      const [bank, amt] = s.split('=')
+      return { bank: String(bank||'').trim(), amount: Number(amt||0) }
+    }).filter(x => x.bank && x.amount > 0)
+  }
+  function parseBankTag(note) {
+    const m = String(note||'').match(/\[Bank:([^\]]+)\]/i)
+    return m ? String(m[1]||'').trim() : null
+  }
+
+  // Compute per-bank used from expenses
+  const bankSpentMap = useMemo(() => {
+    const map = new Map()
+    ;[...expensesBuying, ...expensesSales].forEach(e => {
+      const splits = parseTopupSplits(e.name)
+      if (splits.length > 0) {
+        splits.forEach(s => {
+          const key = normalizeBankName(s.bank)
+          map.set(key, (map.get(key) || 0) + Number(s.amount||0))
+        })
+      } else {
+        const bank = parseBankTag(e.name)
+        if (bank) {
+          const key = normalizeBankName(bank)
+          map.set(key, (map.get(key) || 0) + Number(e.amount||0))
+        }
+      }
+    })
+    return map
+  }, [expensesBuying, expensesSales])
+
+  // Bank modal state
+  const [bankModalOpen, setBankModalOpen] = useState(false)
+  const [selectedBank, setSelectedBank] = useState(null)
+  const openBankModal = (bank) => { setSelectedBank(bank); setBankModalOpen(true) }
+  const closeBankModal = () => { setBankModalOpen(false); setSelectedBank(null) }
+  const bankExpenseList = useMemo(() => {
+    if (!selectedBank) return []
+    const key = normalizeBankName(selectedBank)
+    const list = [...expensesBuying, ...expensesSales].filter(e => {
+      const splits = parseTopupSplits(e.name)
+      if (splits.length > 0) return splits.some(s => normalizeBankName(s.bank) === key)
+      const tag = parseBankTag(e.name)
+      return tag ? normalizeBankName(tag) === key : false
+    }).map(e => {
+      const splits = parseTopupSplits(e.name)
+      const amt = splits.length > 0 ? (splits.find(s => normalizeBankName(s.bank) === key)?.amount || 0) : Number(e.amount||0)
+      return { id: e.id, name: stripBankAndSplitTags(e.name), amount: Number(amt||0) }
+    })
+    return list
+  }, [selectedBank, expensesBuying, expensesSales])
+  const bankExpenseTotal = useMemo(() => bankExpenseList.reduce((s,e)=>s+Number(e.amount||0),0), [bankExpenseList])
 
   useEffect(() => {
     let cancelled = false
@@ -142,6 +220,7 @@ const ShopPage = () => {
       if (cancelled) return
       const amt = Number(budgetRow?.amount || 0)
       setBudgetInfo({ amount: amt, id: budgetRow?.id || null })
+      setBankAllocations(Array.isArray(budgetRow?.allocations) ? budgetRow.allocations.map(a => ({ bank: a.bank, amount: Number(a.amount||0), source_id: a.source_id })) : [])
       setExpensesBuying((buyRows || []).map(e => ({ id: e.id, name: e.note || 'Expense', payee: e.payee || null, amount: Number(e.amount||0), date: e.spent_at, kind: e.kind, edited: Boolean(e.edited) })))
       setExpensesSales((saleRows || []).map(e => ({ id: e.id, name: e.note || 'Sale', payee: e.payee || null, amount: Number(e.amount||0), date: e.spent_at, kind: e.kind, edited: Boolean(e.edited) })))
       setTopups((topupRows || []).map(e => ({ id: e.id, reason: e.note || 'Added amount', type: e.payee || null, amount: Number(e.amount||0), date: e.spent_at, kind: 'topup' })))
@@ -263,12 +342,23 @@ const ShopPage = () => {
 
       const amountNum = Number(setupBudgetAmount || 0)
       if (amountNum <= 0) { toast.error('Enter a valid purchasing budget'); return }
-      const { data: budgetRow, error: budErr } = await upsertBudget(user.id, catId, amountNum)
+      // Clean allocations from setup form (resolve Other -> custom name)
+      const cleanedAllocations = (setupAllocations || [])
+        .map(a => ({ bank: String((a.bank === 'Other' ? a.other : a.bank) || '').trim(), amount: Number(a.amount||0) }))
+        .filter(a => a.bank && a.amount > 0)
+      // Validate splits equal to budget
+      const splitTotal = cleanedAllocations.reduce((s,a)=> s + Number(a.amount||0), 0)
+      if (Math.round(splitTotal) !== Math.round(amountNum)) {
+        toast.error('Payment source splits must equal the purchasing budget')
+        return
+      }
+      const { data: budgetRow, error: budErr } = await upsertBudget(user.id, catId, amountNum, undefined, cleanedAllocations)
       if (budErr) { toast.error(budErr.message); return }
 
       setSelectedCategoryId(catId)
       setSelectedCategoryName(catName)
       setBudgetInfo({ amount: Number(budgetRow.amount || amountNum), id: budgetRow.id })
+      setBankAllocations(Array.isArray(budgetRow?.allocations) ? budgetRow.allocations.map(a => ({ bank: a.bank, amount: Number(a.amount||0), source_id: a.source_id })) : cleanedAllocations)
       setShowSetupModal(false)
       toast.success('Shop category and budget saved')
     } catch (err) {
@@ -495,6 +585,38 @@ const ShopPage = () => {
 
           <MiniSpendChart buyingExpenses={expensesBuying} labourExpenses={expensesSales} />
 
+          {/* Payment Sources chips */}
+          {bankAllocations && bankAllocations.length > 0 && (
+            <div className="mt-3 p-3 bg-white/10 rounded-xl">
+              <div className="text-xs text-white/80 mb-2">Payment Sources</div>
+              <div className="flex flex-wrap gap-2">
+                {bankAllocations.map((a, idx) => {
+                  const total = Number(a.amount || 0)
+                  const used = bankSpentMap.get(normalizeBankName(a.bank)) || 0
+                  const remaining = Math.max(0, total - used)
+                  const icon = bankIconSrc(a.bank)
+                  return (
+                    <div key={idx} className="min-w-[160px] max-w-[200px] px-3 py-2 rounded-lg bg-white/10 text-white text-xs ring-1 ring-white/20">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1 truncate">
+                          {icon ? <img src={icon} alt="bank" className="w-4 h-4" /> : <span className="inline-block w-4 h-4 rounded-full bg-white/20" />}
+                          <span className="font-semibold truncate">{a.bank}</span>
+                        </div>
+                        <button type="button" title="View details" onClick={() => openBankModal(a.bank)} className="p-1 rounded-md bg-white/10 hover:bg-white/20">
+                          <Eye className="w-3 h-3" />
+                        </button>
+                      </div>
+                      <div className="leading-tight">
+                        <div>Used ₹{Number(used).toLocaleString()} / ₹{Number(total).toLocaleString()}</div>
+                        <div className="opacity-80">Remaining ₹{Number(remaining).toLocaleString()}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           {topups.length > 0 && (
             <div className="mt-3 p-3 bg-white/10 rounded-xl">
               <div className="text-xs text-white/80 mb-2">Budget Additions</div>
@@ -671,7 +793,7 @@ const ShopPage = () => {
         {/* Initial Budget form modal (shown when no budget set yet) */}
         {showBudgetForm && (
           <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
-            <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4 text-black dark:text-white">
+            <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4 text-black dark:text-white max-h-[85vh] overflow-y-auto thin-scrollbar">
               <div className="flex items-center justify-between mb-3">
                 <h4 className="font-semibold text-black dark:text-white">Set Budget</h4>
                 <button onClick={() => setShowBudgetForm(false)} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">✕</button>
@@ -761,11 +883,108 @@ const ShopPage = () => {
                   <input type="number" min="0" step="0.01" value={setupBudgetAmount} onChange={(e)=>setSetupBudgetAmount(e.target.value)} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white placeholder:text-black/70 dark:placeholder:text-black/70 caret-black" placeholder="e.g. 500000" />
                 </div>
 
+                {/* Payment Sources & Bank Splits (like Home Building) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm font-semibold text-black dark:text-white">Payment Sources Allocation</div>
+                    <button type="button" onClick={()=> setSetupAllocations(prev => [...prev, { bank: '', amount: '', other: '' }])} className="px-3 py-1 rounded-md bg-white/10 hover:bg-white/20 text-white text-xs ring-1 ring-white/20">+ Add Split</button>
+                  </div>
+                  <div className="space-y-2">
+                    {setupAllocations.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-[1fr_auto] gap-2 items-end">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-xs text-black dark:text-white">Bank</label>
+                            <div className="flex items-center gap-2">
+                              {bankIconSrc(row.bank === 'Other' ? row.other : row.bank) ? (
+                                <img src={bankIconSrc(row.bank === 'Other' ? row.other : row.bank)} alt="bank" className="w-5 h-5" />
+                              ) : (
+                                <span className="inline-block w-5 h-5 rounded-full bg-white/20" />
+                              )}
+                              <select value={row.bank} onChange={(e)=>{
+                                const v = e.target.value
+                                setSetupAllocations(prev => prev.map((r,i)=> i===idx ? { ...r, bank: v } : r))
+                              }} className="w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white">
+                                <option value="">Select bank…</option>
+                                <option value="HDFC">HDFC</option>
+                                <option value="SBI">SBI</option>
+                                <option value="ICICI">ICICI</option>
+                                <option value="Bank of Baroda">Bank of Baroda</option>
+                                <option value="Bank of India">Bank of India</option>
+                                <option value="Central Bank of India">Central Bank of India</option>
+                                <option value="Other">Other (custom)</option>
+                              </select>
+                            </div>
+                            {row.bank === 'Other' && (
+                              <input type="text" value={row.other} onChange={(e)=>{
+                                const v = e.target.value
+                                setSetupAllocations(prev => prev.map((r,i)=> i===idx ? { ...r, other: v } : r))
+                              }} className="mt-2 w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white" placeholder="Custom bank name" />
+                            )}
+                          </div>
+                          <div>
+                            <label className="text-xs text-black dark:text-white">Amount (₹)</label>
+                            <input type="number" min="0" step="0.01" value={row.amount} onChange={(e)=>{
+                              const v = e.target.value
+                              setSetupAllocations(prev => prev.map((r,i)=> i===idx ? { ...r, amount: v } : r))
+                            }} className={`w-full px-3 py-2 rounded-md bg-gray-100 dark:bg-zinc-700 text-black dark:text-white placeholder:text-black/70 dark:placeholder:text-black/70 caret-black ${overBudget ? 'ring-1 ring-red-400' : (underBudget ? 'ring-1 ring-amber-400' : '')}` } placeholder="e.g. 350000" />
+                          </div>
+                        </div>
+                        <button type="button" onClick={()=> setSetupAllocations(prev => prev.filter((_,i)=> i!==idx))} className="px-2 py-2 rounded-md bg-gray-200 dark:bg-zinc-700 text-black dark:text-white text-xs">Remove</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={()=> setSetupAllocations(prev => [...prev, { bank: '', amount: '', other: '' }])} className="px-3 py-2 rounded-md bg-green-600 hover:bg-green-700 text-white text-xs w-full">+ Add Another Split</button>
+                    <div className="mt-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="opacity-80">Split total: ₹{Number(setupAllocSum).toLocaleString()} • Budget: ₹{Number(setupBudgetNum).toLocaleString()}</span>
+                        {setupBudgetNum > 0 && (
+                          overBudget ? (
+                            <span className="text-red-500">Exceeds by ₹{Number(setupAllocSum - setupBudgetNum).toLocaleString()}</span>
+                          ) : underBudget ? (
+                            <span className="text-amber-400">Short by ₹{Number(setupBudgetNum - setupAllocSum).toLocaleString()}</span>
+                          ) : (
+                            <span className="text-green-500">Perfectly matched</span>
+                          )
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-xs text-black/70 dark:text-white/70">Add as many banks as needed. This matches the Home Building split design.</p>
+                  </div>
+                </div>
+
                 <div className="flex justify-end gap-2">
                   <button type="button" onClick={()=>setShowSetupModal(false)} className="px-3 py-2 rounded-md bg-gray-200 dark:bg-zinc-700 text-black dark:text-white">Cancel</button>
                   <button type="submit" className="px-3 py-2 rounded-md bg-brand-dark text-white">Save</button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Bank details modal */}
+        {bankModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end md:items-center justify-center">
+            <div className="w-full max-w-md bg-white dark:bg-zinc-800 rounded-t-2xl md:rounded-2xl shadow-lg p-4 text-black dark:text-white">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-black dark:text-white">{selectedBank ? `${selectedBank} Details` : 'Bank Details'}</h4>
+                <button onClick={closeBankModal} aria-label="Close" className="p-2 rounded-full bg-gray-200 dark:bg-zinc-700">✕</button>
+              </div>
+              <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+                {bankExpenseList.length > 0 ? bankExpenseList.map(item => (
+                  <div key={item.id} className="flex items-center justify-between text-sm">
+                    <div className="truncate pr-2">{item.name}</div>
+                    <div className="font-medium">₹{Number(item.amount).toLocaleString()}</div>
+                  </div>
+                )) : (
+                  <div className="text-sm text-gray-500">No expenses for this bank</div>
+                )}
+              </div>
+              <div className="mt-3 p-3 rounded-xl bg-white/10 dark:bg-zinc-700">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm">Total Used</div>
+                  <div className="font-extrabold text-xl">₹{Number(bankExpenseTotal).toLocaleString()}</div>
+                </div>
+              </div>
             </div>
           </div>
         )}
