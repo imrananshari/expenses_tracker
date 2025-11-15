@@ -227,11 +227,12 @@ async function upsertAllocations(admin, { userId, budgetId, allocations, sync = 
       let bankName = a.bank
       let imageUrl = null
       if (!sourceId && bankName) {
-        // Try find existing source with this name
+        // Try find existing source with this name (GLOBAL by name)
         const { data: existing, error: srcErr } = await admin
           .from('payment_sources')
           .select('id, name, image_url')
-          .eq('user_id', userId)
+          // Avoid user_id filter because name is globally unique in DB
+          // Use case-insensitive exact match to reuse existing records
           .ilike('name', bankName)
           .maybeSingle()
         if (srcErr) return { allocations: [], error: srcErr.message }
@@ -242,6 +243,7 @@ async function upsertAllocations(admin, { userId, budgetId, allocations, sync = 
         } else {
           const { data: created, error: insErr } = await admin
             .from('payment_sources')
+            // Insert a new global payment source when none exists
             .insert({ user_id: userId, name: bankName })
             .select('id, name, image_url')
             .single()
